@@ -1,0 +1,24 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+overrides:
+  '@types/node': '22.20.1'
+allowBuilds:
+  '@prisma/client': true
+  '@prisma/engines': true
+  '@scarf/scarf': false
+  '@swc/core': true
+  argon2: true
+  esbuild: true
+  msgpackr-extract: true
+  prisma: true
+  protobufjs: true
+minimumReleaseAgeExclude:
+  - '@turbo/darwin-64@2.10.9'
+  - '@turbo/darwin-arm64@2.10.9'
+  - '@turbo/linux-64@2.10.9'
+  - '@turbo/linux-arm64@2.10.9'
+  - '@turbo/windows-64@2.10.9'
+  - '@turbo/windows-arm64@2.10.9'
+  - turbo@2.10.9
+  - '@anthropic-ai/sdk@0.117.1'

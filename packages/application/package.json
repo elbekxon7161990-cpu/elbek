@@ -1,0 +1,28 @@
+{
+  "name": "@afa/application",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Application layer. Use-case orchestration, application services, and DTOs. Depends only on @afa/domain (entities/interfaces) — never on @afa/infrastructure directly; the composition root in each apps/* bootstrap binds domain interfaces to infrastructure implementations via NestJS DI tokens. Business modules are implemented in a later phase (ENGINEERING-TASK-BREAKDOWN.md Phase 4 onward) — this package is currently structural scaffolding only.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "lint": "eslint \"src/**/*.ts\"",
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "clean": "rimraf dist tsconfig.tsbuildinfo"
+  },
+  "dependencies": {
+    "@afa/domain": "workspace:*",
+    "@nestjs/common": "11.1.28",
+    "class-transformer": "0.5.1",
+    "class-validator": "0.15.1",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2"
+  },
+  "devDependencies": {
+    "rimraf": "6.1.3",
+    "typescript": "5.9.3",
+    "vitest": "3.2.7"
+  }
+}

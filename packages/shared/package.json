@@ -1,0 +1,36 @@
+{
+  "name": "@afa/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cross-cutting concerns shared by every layer and every bootstrap app: config validation, structured logging, global exception handling, validation-pipe configuration. Contains no business logic (IMPLEMENTATION-BLUEPRINT.md §13 coding-standards discipline: business-rule-bearing code lives only in packages/application and packages/domain).",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "lint": "eslint \"src/**/*.ts\"",
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "clean": "rimraf dist tsconfig.tsbuildinfo"
+  },
+  "dependencies": {
+    "@nestjs/common": "11.1.28",
+    "@nestjs/config": "4.0.4",
+    "@nestjs/core": "11.1.28",
+    "@opentelemetry/auto-instrumentations-node": "0.79.0",
+    "@opentelemetry/exporter-trace-otlp-http": "0.221.0",
+    "@opentelemetry/sdk-node": "0.221.0",
+    "class-transformer": "0.5.1",
+    "class-validator": "0.15.1",
+    "nestjs-pino": "4.6.1",
+    "pino": "10.3.1",
+    "pino-http": "11.0.0",
+    "pino-pretty": "13.1.3",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2"
+  },
+  "devDependencies": {
+    "rimraf": "6.1.3",
+    "typescript": "5.9.3",
+    "vitest": "3.2.7"
+  }
+}

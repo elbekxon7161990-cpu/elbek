@@ -1,0 +1,36 @@
+# Production reverse proxy for AFA — used with docker-compose.production.yml.
+#
+# Replace `bot.example.com` (and `api.example.com`, if enabled) with your
+# real domain before deploying. Caddy requests and renews a Let's Encrypt
+# certificate automatically for any domain listed as a site block below —
+# no separate certbot/ACME setup needed — as long as DNS for that domain
+# already points at this server and ports 80/443 are reachable from the
+# internet (80 is needed for the ACME HTTP-01 challenge and for the
+# plain-HTTP-to-HTTPS redirect Caddy adds by default).
+#
+# `telegram-bot`/`api` below are Compose service names, resolved over the
+# internal Compose network — neither container publishes its own host port
+# in production; Caddy is the only public entry point besides SSH.
+
+bot.example.com {
+	# Confirmed in source: TelegramWebhookController handles
+	# POST /telegram/webhook and requires the
+	# x-telegram-bot-api-secret-token header to match TELEGRAM_WEBHOOK_SECRET
+	# (apps/telegram-bot/src/webhook/telegram-webhook.controller.ts) — Caddy
+	# only needs to forward the request as-is; the secret check happens in
+	# the app itself, not here.
+	reverse_proxy telegram-bot:3000
+}
+
+# Optional — only add this if the admin/control-plane API
+# (apps/api: admin auth, API tokens, admin elevation, support sessions) needs
+# to be reachable from the internet at all. The deployment audit's own
+# recommendation: apps/api exposes no general business endpoints today (only
+# an admin/auth control plane), so leave this commented out unless you have
+# a specific reason remote admins need direct HTTPS access to it. If you do
+# enable it, consider narrowing access further (e.g. Caddy's `remote_ip`
+# matcher) rather than leaving admin auth open to the whole internet.
+#
+# api.example.com {
+# 	reverse_proxy api:3000
+# }

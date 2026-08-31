@@ -1,0 +1,19 @@
+# Auto-loaded by plain `docker compose up` alongside docker-compose.yml —
+# no `-f` flag needed (Compose's documented default merge behavior). Restores
+# the host port mappings local development relies on (direct psql/redis-cli/
+# curl access from the host) that docker-compose.yml itself no longer
+# publishes. Never used for a production deploy — docker-compose.production.yml
+# is used there instead, explicitly, via `-f`.
+
+services:
+  postgres:
+    ports:
+      - '5432:5432'
+
+  redis:
+    ports:
+      - '6379:6379'
+
+  api:
+    ports:
+      - '3000:3000'

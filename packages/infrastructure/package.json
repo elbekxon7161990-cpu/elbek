@@ -1,0 +1,51 @@
+{
+  "name": "@afa/infrastructure",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Infrastructure layer. Implements @afa/domain's repository/port interfaces against real persistence and messaging (Prisma/PostgreSQL, Redis, BullMQ). Depends on @afa/domain and @afa/shared; never on @afa/application (IMPLEMENTATION-BLUEPRINT.md §2 package-boundary table). Repository implementations started with ENGINEERING-TASK-BREAKDOWN.md Phase 3's UserRepository; further ones land alongside their owning phase on top of the underlying Prisma/Redis/BullMQ connection modules.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "prisma": {
+    "seed": "ts-node --compiler-options {\"module\":\"CommonJS\"} prisma/seed.ts"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "lint": "eslint \"src/**/*.ts\"",
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "clean": "rimraf dist tsconfig.tsbuildinfo",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate:dev": "prisma migrate dev",
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:migrate:status": "prisma migrate status",
+    "prisma:seed": "prisma db seed",
+    "prisma:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@afa/domain": "workspace:*",
+    "@afa/shared": "workspace:*",
+    "@anthropic-ai/sdk": "0.117.1",
+    "@nestjs/bullmq": "11.0.5",
+    "@nestjs/common": "11.1.28",
+    "@nestjs/config": "4.0.4",
+    "@prisma/client": "5.22.0",
+    "@supabase/supabase-js": "2.112.4",
+    "argon2": "0.45.1",
+    "bullmq": "5.81.3",
+    "exceljs": "4.4.0",
+    "ioredis": "5.11.1",
+    "otplib": "13.5.0",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
+    "telegraf": "4.16.3"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "11.1.28",
+    "@types/node": "22.20.1",
+    "prisma": "5.22.0",
+    "rimraf": "6.1.3",
+    "ts-node": "10.9.2",
+    "typescript": "5.9.3",
+    "vitest": "3.2.7"
+  }
+}

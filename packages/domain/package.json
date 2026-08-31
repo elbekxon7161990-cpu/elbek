@@ -1,0 +1,21 @@
+{
+  "name": "@afa/domain",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Domain layer. Entities, value objects, domain services, and repository/port interfaces for the frozen PRD's financial engine (Chapter 8) and every other module chapter. Deliberately framework-agnostic: zero runtime dependencies on NestJS, Prisma, Redis, or any other package in this repository — packages/infrastructure depends on this package to implement its interfaces, never the reverse (IMPLEMENTATION-BLUEPRINT.md §2 package-boundary table; BR-SYS-002, Chapter 3 §3.21.2). Business modules are implemented in a later phase (ENGINEERING-TASK-BREAKDOWN.md Phase 4 onward) — this package is currently structural scaffolding only.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "lint": "eslint \"src/**/*.ts\"",
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "clean": "rimraf dist tsconfig.tsbuildinfo"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "rimraf": "6.1.3",
+    "typescript": "5.9.3",
+    "vitest": "3.2.7"
+  }
+}

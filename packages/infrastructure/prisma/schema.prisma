@@ -1,0 +1,825 @@
+// ============================================================================
+// AI Personal Finance Assistant — Prisma Schema
+// ============================================================================
+// SOURCE OF TRUTH: sections/13-database-design.md (Chapter 13), the frozen
+// PRD's "single authoritative source for all data architecture" (Ch.13 line 6).
+// Every model below cites the exact Chapter 13 subsection it implements.
+// Do NOT add a column/table here without a citable FR/BR/NFR origin (DB-P2).
+//
+// Column-standard conventions applied throughout, per §13.23 (binding rules,
+// not suggestions):
+//   - PK is always `id UUID @default(dbgenerated("gen_random_uuid()"))`
+//   - Money is always NUMERIC (`Decimal` here), never float (DB-P3)
+//   - Timestamps are always TIMESTAMPTZ (`@db.Timestamptz(6)`), never bare
+//     TIMESTAMP (§13.1 timezone-aware-timestamps principle)
+//   - Enum-like columns are always TEXT with an application/CHECK-level
+//     constraint, NEVER a native Postgres ENUM (§13.23's explicit rule) —
+//     the CHECK IN (...) constraints themselves live in the companion raw-SQL
+//     migration (prisma/migrations/20260808000000_init/migration.sql) because
+//     Prisma's schema DSL has no first-class CHECK-constraint syntax.
+//   - Every FK declares an explicit onDelete behavior (FR-DB-006). Per §13.14,
+//     this schema uses NO hard ON DELETE CASCADE anywhere — soft-delete
+//     cascading (e.g. debt_repayments under debts) is an application-layer
+//     concern, never a database CASCADE that would bypass the audit trail.
+//     Restrict is therefore the default posture on every relation below.
+//
+// KNOWN PRISMA-DSL GAPS (all covered instead in the raw-SQL migration):
+//   - Partial/filtered indexes (`WHERE deleted_at IS NULL`, etc.)
+//   - CHECK constraints (`amount > 0`, `CHECK IN (...)`, etc.)
+//   - GIN index on `transactions.tags`
+//   - Monthly range partitioning on `transactions`, quarterly on
+//     `transaction_audit_log`, monthly on `notifications` (§13.12)
+//   - Row-Level Security policies (§13.35.2, FR-DB-020/021)
+// Prisma is therefore the ORM/type layer (FR-DB-026/027); the raw-SQL
+// migration is the actual PostgreSQL schema of record for everything Prisma
+// cannot express declaratively.
+//
+// ENGINEERING EXECUTION DECISION — flagged, not silent:
+// `admin_sessions` and `api_tokens` below are NOT defined anywhere in
+// Chapter 13's text. They exist to satisfy already-frozen requirements that
+// Chapter 13 never reduced to a schema (FR-AUTH-004/008/009/010/013,
+// FR-SEC-010–014, NFR-AUTH-002/003, BR-AUTH-003) — a real gap between the
+// schema chapter and the auth chapters, not new product scope. Shape and
+// existence are an implementation-discretion call, exactly the kind
+// IMPLEMENTATION-BLUEPRINT.md §13 already establishes a precedent for
+// (FR-CQ-002's coverage-threshold delegation). Reported to the user
+// alongside this file rather than presented as if Chapter 13 defined them.
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ============================================================================
+// §13.3 — Core Table: users
+// ============================================================================
+model User {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  telegramUserId         BigInt    @unique @map("telegram_user_id")
+  telegramUsername       String?   @map("telegram_username") @db.Text
+  displayName            String?   @map("display_name") @db.Text
+  preferredLanguage      String    @default("en") @map("preferred_language") @db.Text
+  defaultCurrency        String    @default("UZS") @map("default_currency") @db.Char(3)
+  timezone               String    @default("Asia/Tashkent") @db.Text
+  status                 String    @default("active") @db.Text
+  onboardingCompletedAt  DateTime? @map("onboarding_completed_at") @db.Timestamptz(6)
+  deletionRequestedAt    DateTime? @map("deletion_requested_at") @db.Timestamptz(6)
+  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  defaultCurrencyRef     Currency  @relation("UserDefaultCurrency", fields: [defaultCurrency], references: [code], onDelete: Restrict)
+
+  transactions           Transaction[]
+  transactionDrafts      TransactionDraft[]
+  debts                  Debt[]
+  counterparties         Counterparty[]
+  budgets                Budget[]
+  accounts               Account[]
+  loans                  Loan[]
+  savingsGoals           SavingsGoal[]
+  recurringTemplates     RecurringTemplate[]
+  scheduledTransactions  ScheduledTransaction[]
+  notifications          Notification[]
+  userSettings           UserSetting[]
+  customCategories       Category[]             @relation("CategoryOwner")
+  customCategoryTranslations CategoryTranslation[] @relation("CategoryTranslationOwner")
+  financialSummary       UserFinancialSummary?
+  // TASK-SEC-006 — additive only, no physical column (virtual relation array)
+  supportSessions        SupportSession[]
+
+  @@index([status])
+  @@map("users")
+}
+
+// ============================================================================
+// §13.4 — Core Table: transactions (extended §13.19.3, §13.21.3)
+// The central table of the entire system.
+// ============================================================================
+model Transaction {
+  id                       String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                   String    @map("user_id") @db.Uuid
+  transactionType          String    @map("transaction_type") @db.Text
+  amount                   Decimal   @db.Decimal(18, 2)
+  currency                 String    @db.Char(3)
+  exchangeRateToDefault    Decimal?  @map("exchange_rate_to_default") @db.Decimal(18, 8)
+  categoryId               String    @map("category_id") @db.Uuid
+  subcategoryId            String?   @map("subcategory_id") @db.Uuid
+  merchant                 String?   @db.Text
+  paymentMethod            String?   @map("payment_method") @db.Text
+  transactionDate          DateTime  @map("transaction_date") @db.Date
+  transactionTime          DateTime? @map("transaction_time") @db.Time(6)
+  location                 String?   @db.Text
+  tags                     String[]  @default([])
+  description              String    @db.Text
+  originalText              String    @map("original_text") @db.Text
+  sourceType                String    @map("source_type") @db.Text
+  sourceReference           String?   @map("source_reference") @db.Text
+  confidenceScores           Json?     @map("confidence_scores") @db.JsonB
+  isRecurringDetected         Boolean   @default(false) @map("is_recurring_detected")
+  linkedTransactionId          String?   @map("linked_transaction_id") @db.Uuid
+  createdBy                     String    @map("created_by") @db.Text
+  deletedAt                      DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt                       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                        DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  // §13.19.3 — Accounts, Transfers & Balance Adjustments extension
+  accountId              String?   @map("account_id") @db.Uuid
+  sourceAccountId         String?   @map("source_account_id") @db.Uuid
+  destinationAccountId     String?   @map("destination_account_id") @db.Uuid
+  destinationAmount          Decimal?  @map("destination_amount") @db.Decimal(18, 2)
+
+  // §13.21.3 — Savings Goals extension
+  goalId                  String?   @map("goal_id") @db.Uuid
+
+  // ENGINEERING EXECUTION DECISION (user-confirmed): transactions is natively
+  // partitioned by transaction_date (§13.12), which requires every unique/PK
+  // constraint on this table — including the one an FK targets — to include
+  // the partition column. linked_transaction_id is therefore paired with a
+  // denormalized linked_transaction_date so the FK can target the composite
+  // (id, transaction_date) key rather than id alone. Same pattern applied to
+  // the three other tables holding a plain FK into transactions.id
+  // (TransactionDraft, ScheduledTransaction, TransactionAuditLog, below).
+  linkedTransactionDate    DateTime? @map("linked_transaction_date") @db.Date
+
+  user                    User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  category                Category  @relation("TransactionCategory", fields: [categoryId], references: [id], onDelete: Restrict)
+  subcategory             Category? @relation("TransactionSubcategory", fields: [subcategoryId], references: [id], onDelete: Restrict)
+  currencyRef              Currency  @relation("TransactionCurrency", fields: [currency], references: [code], onDelete: Restrict)
+  linkedTransaction        Transaction? @relation("TransactionLink", fields: [linkedTransactionId, linkedTransactionDate], references: [id, transactionDate], onDelete: Restrict)
+  linkedFrom                Transaction[] @relation("TransactionLink")
+  account                  Account?  @relation("TransactionAccount", fields: [accountId], references: [id], onDelete: Restrict)
+  sourceAccount             Account?  @relation("TransferSource", fields: [sourceAccountId], references: [id], onDelete: Restrict)
+  destinationAccount         Account?  @relation("TransferDestination", fields: [destinationAccountId], references: [id], onDelete: Restrict)
+  goal                      SavingsGoal? @relation(fields: [goalId], references: [id], onDelete: Restrict)
+
+  auditLogEntries            TransactionAuditLog[]
+  draftsResolved              TransactionDraft[]     @relation("DraftResolvedTransaction")
+  scheduledActivations          ScheduledTransaction[] @relation("ScheduledActivation")
+
+  // Declared here for documentation/type-generation purposes; the actual
+  // enforced form is the partial index in the raw-SQL migration (§13.4):
+  //   INDEX (user_id, transaction_date DESC) WHERE deleted_at IS NULL
+  @@index([userId, transactionDate])
+  @@index([userId, categoryId, transactionDate])
+  @@index([userId, transactionType])
+  @@index([linkedTransactionId])
+  // FR-DB-022 — new index supporting the account-balance query pattern
+  @@index([accountId, transactionDate])
+  // Composite unique target required for partitioned-table FK references
+  // (id alone cannot be unique on a table partitioned by transaction_date;
+  // see linkedTransactionDate comment above) — id remains globally unique
+  // in practice via UUID generation, not via a Postgres-enforced constraint.
+  @@unique([id, transactionDate])
+  @@map("transactions")
+}
+
+// ============================================================================
+// §13.5 — Table: transaction_drafts
+// ============================================================================
+model TransactionDraft {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                 String    @map("user_id") @db.Uuid
+  partialData            Json      @map("partial_data") @db.JsonB
+  missingFields           String[]  @map("missing_fields")
+  status                  String    @default("pending") @db.Text
+  originalText             String    @map("original_text") @db.Text
+  sourceType                String    @map("source_type") @db.Text
+  resolvedTransactionId       String?   @map("resolved_transaction_id") @db.Uuid
+  // Paired with resolvedTransactionId to satisfy the partitioned-table
+  // composite-FK requirement (see Transaction.linkedTransactionDate)
+  resolvedTransactionDate       DateTime? @map("resolved_transaction_date") @db.Date
+  createdAt                    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastInteractionAt              DateTime  @default(now()) @map("last_interaction_at") @db.Timestamptz(6)
+  deletedAt                       DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  user                    User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  resolvedTransaction       Transaction? @relation("DraftResolvedTransaction", fields: [resolvedTransactionId, resolvedTransactionDate], references: [id, transactionDate], onDelete: Restrict)
+
+  @@index([userId, status, lastInteractionAt])
+  @@map("transaction_drafts")
+}
+
+// ============================================================================
+// §13.6 — Tables: debts, debt_repayments, counterparties
+// ============================================================================
+model Debt {
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                String    @map("user_id") @db.Uuid
+  direction              String    @db.Text
+  counterpartyName         String    @map("counterparty_name") @db.Text
+  counterpartyRefId          String?   @map("counterparty_ref_id") @db.Uuid
+  originalAmount               Decimal   @map("original_amount") @db.Decimal(18, 2)
+  outstandingBalance             Decimal   @map("outstanding_balance") @db.Decimal(18, 2)
+  currency                        String    @db.Char(3)
+  transactionDate                  DateTime  @map("transaction_date") @db.Date
+  dueDate                            DateTime? @map("due_date") @db.Date
+  status                              String    @default("open") @db.Text
+  notes                                String?   @db.Text
+  originalText                          String    @map("original_text") @db.Text
+  deletedAt                              DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt                               DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                                DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  counterpartyRef         Counterparty? @relation(fields: [counterpartyRefId], references: [id], onDelete: Restrict)
+  currencyRef               Currency  @relation("DebtCurrency", fields: [currency], references: [code], onDelete: Restrict)
+  repayments                  DebtRepayment[]
+
+  @@index([userId, status, dueDate])
+  @@index([userId, counterpartyRefId])
+  @@map("debts")
+}
+
+model DebtRepayment {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  debtId         String    @map("debt_id") @db.Uuid
+  amount          Decimal   @db.Decimal(18, 2)
+  currency         String    @db.Char(3)
+  repaymentDate      DateTime  @map("repayment_date") @db.Date
+  originalText         String    @map("original_text") @db.Text
+  deletedAt              DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt                DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  debt           Debt      @relation(fields: [debtId], references: [id], onDelete: Restrict)
+  currencyRef      Currency  @relation("DebtRepaymentCurrency", fields: [currency], references: [code], onDelete: Restrict)
+
+  @@map("debt_repayments")
+}
+
+model Counterparty {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  name        String    @db.Text
+  aliases      String[]  @default([])
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user       User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  debts        Debt[]
+
+  @@unique([userId, name])
+  @@map("counterparties")
+}
+
+// ============================================================================
+// §13.7 — Table: budgets, budget_notification_log
+// ============================================================================
+model Budget {
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                String    @map("user_id") @db.Uuid
+  scopeType              String    @map("scope_type") @db.Text
+  categoryId               String?   @map("category_id") @db.Uuid
+  limitAmount                Decimal   @map("limit_amount") @db.Decimal(18, 2)
+  currency                     String    @db.Char(3)
+  periodType                     String    @map("period_type") @db.Text
+  currentPeriodStart               DateTime  @map("current_period_start") @db.Date
+  currentPeriodEnd                   DateTime  @map("current_period_end") @db.Date
+  status                              String    @default("active") @db.Text
+  deletedAt                            DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt                              DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                                DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  category                Category? @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  currencyRef                Currency  @relation("BudgetCurrency", fields: [currency], references: [code], onDelete: Restrict)
+  notificationLog             BudgetNotificationLog[]
+
+  // Real form (partial unique per §13.7) lives in the raw-SQL migration:
+  //   UNIQUE (user_id, category_id, period_type) WHERE deleted_at IS NULL AND scope_type='category'
+  //   UNIQUE (user_id, period_type) WHERE deleted_at IS NULL AND scope_type='overall'
+  @@map("budgets")
+}
+
+model BudgetNotificationLog {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  budgetId       String   @map("budget_id") @db.Uuid
+  thresholdFired  Int      @map("threshold_fired")
+  periodStart       DateTime @map("period_start") @db.Date
+  firedAt             DateTime @default(now()) @map("fired_at") @db.Timestamptz(6)
+
+  budget         Budget   @relation(fields: [budgetId], references: [id], onDelete: Restrict)
+
+  @@unique([budgetId, thresholdFired, periodStart])
+  @@map("budget_notification_log")
+}
+
+// ============================================================================
+// §13.8 — Reference Tables: categories, category_translations, currencies, fx_rates
+// ============================================================================
+model Category {
+  id                        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code                       String    @unique @db.Text
+  parentCategoryId             String?   @map("parent_category_id") @db.Uuid
+  defaultType                    String    @map("default_type") @db.Text
+  icon                             String?   @db.Text
+  isSystem                          Boolean   @default(true) @map("is_system")
+  ownerUserId                        String?   @map("owner_user_id") @db.Uuid
+  status                               String    @default("active") @db.Text
+  replacementCategoryId                 String?   @map("replacement_category_id") @db.Uuid
+  createdAt                              DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  parentCategory            Category? @relation("CategoryHierarchy", fields: [parentCategoryId], references: [id], onDelete: Restrict)
+  childCategories             Category[] @relation("CategoryHierarchy")
+  replacementCategory           Category? @relation("CategoryReplacement", fields: [replacementCategoryId], references: [id], onDelete: Restrict)
+  replacedBy                      Category[] @relation("CategoryReplacement")
+  ownerUser                          User?     @relation("CategoryOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+
+  translations               CategoryTranslation[]
+  transactionsAsCategory       Transaction[] @relation("TransactionCategory")
+  transactionsAsSubcategory      Transaction[] @relation("TransactionSubcategory")
+  budgets                           Budget[]
+
+  @@map("categories")
+}
+
+model CategoryTranslation {
+  categoryId  String   @map("category_id") @db.Uuid
+  language     String   @db.Text
+  label         String   @db.Text
+  // TASK-FIN-006 — denormalized from Category.ownerUserId (NULL for every
+  // system-category translation row); the DB-level duplicate-name guard
+  // (migration 20260830000000_custom_categories) lives on this column, not
+  // on `categories` itself, since the display name is stored here.
+  ownerUserId String?  @map("owner_user_id") @db.Uuid
+
+  category    Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  ownerUser   User?    @relation("CategoryTranslationOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+
+  @@id([categoryId, language])
+  @@map("category_translations")
+}
+
+model Currency {
+  code                    String   @id @db.Char(3)
+  symbol                   String?  @db.Text
+  decimalPlaces               Int      @default(2) @map("decimal_places") @db.SmallInt
+  isActive                       Boolean  @default(true) @map("is_active")
+
+  usersDefaultingHere      User[]   @relation("UserDefaultCurrency")
+  transactions               Transaction[] @relation("TransactionCurrency")
+  debts                         Debt[]        @relation("DebtCurrency")
+  debtRepayments                   DebtRepayment[] @relation("DebtRepaymentCurrency")
+  budgets                            Budget[]      @relation("BudgetCurrency")
+  accounts                              Account[]     @relation("AccountCurrency")
+  loans                                    Loan[]        @relation("LoanCurrency")
+  savingsGoals                               SavingsGoal[] @relation("SavingsGoalCurrency")
+  fxRatesAsBase                                 FxRate[]      @relation("FxRateBase")
+  fxRatesAsQuote                                   FxRate[]      @relation("FxRateQuote")
+
+  @@map("currencies")
+}
+
+model FxRate {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  baseCurrency     String   @map("base_currency") @db.Char(3)
+  quoteCurrency      String   @map("quote_currency") @db.Char(3)
+  rate                 Decimal  @db.Decimal(18, 8)
+  asOfDate                DateTime @map("as_of_date") @db.Date
+  source                    String?  @db.Text
+
+  base            Currency @relation("FxRateBase", fields: [baseCurrency], references: [code], onDelete: Restrict)
+  quote             Currency @relation("FxRateQuote", fields: [quoteCurrency], references: [code], onDelete: Restrict)
+
+  @@unique([baseCurrency, quoteCurrency, asOfDate])
+  @@map("fx_rates")
+}
+
+// ============================================================================
+// §13.9 — Supporting Tables: transaction_audit_log, notifications, user_settings
+// (extended §13.29.2 FR-DB-012 with entity_table)
+// ============================================================================
+model TransactionAuditLog {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  transactionId    String    @map("transaction_id") @db.Uuid
+  // Paired with transactionId — see Transaction.linkedTransactionDate. Not
+  // nullable: an audit row is only ever written against an existing (and
+  // therefore date-bearing) transaction.
+  transactionDate    DateTime  @map("transaction_date") @db.Date
+  // FR-DB-012 — nullable, defaults to 'transactions' for backward compatibility
+  // with every pre-existing row; carries entries for debts/budgets/accounts/
+  // loans/savings_goals too (one shared audit table, not five parallel ones).
+  entityTable        String    @default("transactions") @map("entity_table") @db.Text
+  fieldName             String    @map("field_name") @db.Text
+  oldValue                 String?   @map("old_value") @db.Text
+  newValue                    String?   @map("new_value") @db.Text
+  changedBy                     String    @map("changed_by") @db.Text
+  changedAt                       DateTime  @default(now()) @map("changed_at") @db.Timestamptz(6)
+
+  transaction    Transaction @relation(fields: [transactionId, transactionDate], references: [id, transactionDate], onDelete: Restrict)
+
+  @@index([transactionId, changedAt])
+  @@map("transaction_audit_log")
+}
+
+model Notification {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  type          String    @db.Text
+  payload         Json      @db.JsonB
+  status            String    @db.Text
+  sentAt              DateTime? @map("sent_at") @db.Timestamptz(6)
+  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@map("notifications")
+}
+
+model UserSetting {
+  userId        String @map("user_id") @db.Uuid
+  settingKey      String @map("setting_key") @db.Text
+  settingValue      Json   @map("setting_value") @db.JsonB
+
+  user          User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@id([userId, settingKey])
+  @@map("user_settings")
+}
+
+// ============================================================================
+// §13.9 — admins / audit_log (full column detail per Chapter 16 §16.4.2)
+// ============================================================================
+model Admin {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  // BR-AUTH-003 — individually attributable, no shared/generic admin logins
+  email                   String    @unique @db.Text
+  passwordHash              String    @map("password_hash") @db.Text
+  // FR-AUTH-008 — TOTP (RFC 6238) baseline; stores a reference to the secret
+  // in the secrets manager (FR-SCR-M-001), never the raw TOTP seed in this table
+  mfaSecretRef                 String?   @map("mfa_secret_ref") @db.Text
+  role                            String    @db.Text // support_agent | admin | super_admin (§7.1.7)
+  status                            String    @default("active") @db.Text
+  failedLoginAttempts                  Int       @default(0) @map("failed_login_attempts")
+  // TASK-AUTH-002 — start of the current rolling 15-minute failure-counting
+  // window (NFR-AUTH-004). NULL when there is no open window (no recent
+  // failure, or the account is currently locked — see
+  // compute-admin-lockout-outcome.ts). Distinct from `updatedAt`/`lockedUntil`
+  // deliberately: reusing either would silently overload an unrelated column
+  // with security state (this task's own explicit instruction), and neither
+  // can represent "when did the CURRENT window start" once other admin
+  // fields (email, role, etc.) start being updated by future admin-management
+  // tasks.
+  failedLoginWindowStartedAt           DateTime? @map("failed_login_window_started_at") @db.Timestamptz(6)
+  // NFR-AUTH-004 — lock after 5 consecutive failures within 15 minutes
+  lockedUntil                            DateTime? @map("locked_until") @db.Timestamptz(6)
+  // TASK-AUTH-002 — number of consecutive lockout cycles since the last fully
+  // successful (password + MFA) authentication; indexes into the exponential
+  // backoff schedule (1/2/4/8/15 min). Reset to 0 only on a complete
+  // successful login, never on a mere lockout-expiry — this is what makes the
+  // backoff actually exponential across repeated lockouts, not just a fixed
+  // per-lockout duration.
+  lockoutCycleCount                        Int       @default(0) @map("lockout_cycle_count")
+  createdAt                                  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                                    DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  sessions               AdminSession[]
+  auditLogEntries          AuditLog[]
+  // TASK-AUTH-005 — additive only, no physical column on `admins` (Prisma
+  // relation-array fields are virtual; the FK lives on `admin_elevation_requests`)
+  elevationRequests           AdminElevationRequest[] @relation("AdminElevationTarget")
+  elevationApprovals             AdminElevationRequest[] @relation("AdminElevationApprover")
+  // TASK-SEC-006 — additive only, no physical column (virtual relation arrays)
+  supportSessionsAsAgent            SupportSession[]
+  supportSessionElevationApprovals     SupportSessionElevationRequest[] @relation("SupportSessionElevationApprover")
+
+  @@map("admins")
+}
+
+model AuditLog {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  actorType         String    @map("actor_type") @db.Text
+  actorId              String?   @map("actor_id") @db.Uuid
+  action                  String    @db.Text
+  targetUserId               String?   @map("target_user_id") @db.Uuid
+  targetResource                String?   @map("target_resource") @db.Text
+  justification                    String?   @db.Text
+  ipAddress                          String?   @map("ip_address") @db.Inet
+  metadata                              Json?     @db.JsonB
+  createdAt                                DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  actorAdmin      Admin?    @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  // Immutable per §16.4.2 — append-only at the application level; no
+  // update()/delete() call may ever target this model in application code,
+  // and the database role backing it is INSERT/SELECT-only (raw-SQL migration).
+  @@index([targetUserId])
+  @@index([actorId])
+  @@map("audit_log")
+}
+
+// ============================================================================
+// ENGINEERING EXECUTION DECISION — Auth Session & Token Storage
+// Not defined in Chapter 13. Grounds: FR-AUTH-004, FR-AUTH-008, FR-AUTH-009,
+// FR-AUTH-010, FR-AUTH-013, FR-SEC-010–014, NFR-AUTH-002, NFR-AUTH-003,
+// BR-AUTH-003. See file-header disclosure above.
+// ============================================================================
+model AdminSession {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  adminId            String    @map("admin_id") @db.Uuid
+  tokenHash            String    @unique @map("token_hash") @db.Text
+  // FR-SEC-013 — a nested support session cannot outlive the outer Admin
+  // Panel session it was opened within; self-relation carries that nesting.
+  parentSessionId        String?   @map("parent_session_id") @db.Uuid
+  ipAddress                 String?   @map("ip_address") @db.Inet
+  createdAt                    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastActiveAt                    DateTime  @default(now()) @map("last_active_at") @db.Timestamptz(6)
+  // NFR-AUTH-002 — absolute expiry ceiling (<=24h), independent of activity
+  expiresAt                          DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt                             DateTime? @map("revoked_at") @db.Timestamptz(6)
+
+  admin             Admin     @relation(fields: [adminId], references: [id], onDelete: Restrict)
+  parentSession        AdminSession?  @relation("SupportSessionNesting", fields: [parentSessionId], references: [id], onDelete: Restrict)
+  childSessions           AdminSession[] @relation("SupportSessionNesting")
+
+  @@index([adminId, revokedAt])
+  @@map("admin_sessions")
+}
+
+model ApiToken {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  // FR-AUTH-005 — scoped bearer tokens for API consumers, never a shared
+  // static key; clientIdentifier names the issued-to consumer.
+  clientIdentifier    String    @map("client_identifier") @db.Text
+  tokenType              String    @map("token_type") @db.Text // access | refresh (FR-AUTH-009)
+  tokenHash                String    @unique @map("token_hash") @db.Text
+  scope                       String[]
+  // FR-AUTH-013 — every token carries a per-token rate limit
+  rateLimitPerMinute             Int       @map("rate_limit_per_minute")
+  parentTokenId                     String?   @map("parent_token_id") @db.Uuid // links a refresh token to the access token it issues
+  expiresAt                            DateTime  @map("expires_at") @db.Timestamptz(6)
+  // FR-AUTH-010 — checked on every request as a fast-lookup revocation list
+  revokedAt                               DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt                                  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  parentToken       ApiToken? @relation("TokenRefreshChain", fields: [parentTokenId], references: [id], onDelete: Restrict)
+  issuedTokens        ApiToken[] @relation("TokenRefreshChain")
+
+  @@index([clientIdentifier])
+  @@index([expiresAt, revokedAt])
+  @@map("api_tokens")
+}
+
+// ============================================================================
+// ENGINEERING EXECUTION DECISION — Admin Elevation Requests
+// Not defined in Chapter 13. Grounds: FR-SEC-001–005, BR-SEC-001, AC-SEC-001
+// (Chapter 16 §16.10). TASK-AUTH-005's own persistence for the `admin` ->
+// `super_admin` elevation-approval flow. Pending-state model (`resolvedAt
+// IS NULL AND expiresAt > now`) mirrors `AdminSession`/`ApiToken`'s own
+// established "active-row lookup" shape rather than inventing a new one.
+// Deliberately NOT modeled on `audit_log` (append-only) — this row is
+// mutated exactly once (the atomic resolve), which `audit_log`'s
+// INSERT/SELECT-only DB role grant would not permit.
+// ============================================================================
+model AdminElevationRequest {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  targetAdminId       String    @map("target_admin_id") @db.Uuid
+  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  // Judgment call, not PRD-specified — same disclosed-default posture as
+  // ADMIN_MFA_CHALLENGE_TTL_MS (TASK-AUTH-002): a short, low-stakes window
+  // for a two-human real-time coordination step, not a product policy value.
+  expiresAt                 DateTime  @map("expires_at") @db.Timestamptz(6)
+  // NULL = pending. Both set together, atomically, on approval — never one
+  // without the other (see PrismaAdminElevationRepository.grant()).
+  resolvedAt                    DateTime? @map("resolved_at") @db.Timestamptz(6)
+  resolvedByAdminId                String?   @map("resolved_by_admin_id") @db.Uuid
+
+  targetAdmin       Admin     @relation("AdminElevationTarget", fields: [targetAdminId], references: [id], onDelete: Restrict)
+  resolvedByAdmin      Admin?    @relation("AdminElevationApprover", fields: [resolvedByAdminId], references: [id], onDelete: Restrict)
+
+  @@index([targetAdminId, resolvedAt])
+  @@map("admin_elevation_requests")
+}
+
+// ============================================================================
+// ENGINEERING EXECUTION DECISION — Support Sessions
+// Not defined in Chapter 13. Grounds: FR-ADM-006, FR-ADM-008, FR-ADM-009,
+// FR-ADM-010, §11.2.6, §11.7.2 (Chapter 11). TASK-SEC-006's persistence for
+// the justified/logged/time-bounded support-session flow.
+//
+// `Requested` (§11.7.2) is deliberately NOT modeled as its own persisted (or
+// Redis) state: the open-session endpoint requires the justification in the
+// SAME call, so nothing is ever created — not even an ephemeral record —
+// until a reason code is present. This satisfies FR-ADM-010 ("an abandoned
+// request must not create any audit log entry") more strongly than a
+// separate ephemeral-state model would: an abandoned request here leaves
+// literally zero trace anywhere, not just no audit entry.
+//
+// `Elevated` (raw transaction detail) is a separate approval-request table,
+// deliberately NOT sharing `AdminElevationRequest` (TASK-AUTH-005) — that
+// table performs a PERMANENT `Admin.role` mutation; this one performs a
+// TEMPORARY, session-scoped, reversible state transition. Same
+// architectural pattern (atomic conditional consume + audit-transaction
+// coupling), different target, per the TASK-SEC-006 audit's own reasoning
+// for not modifying AUTH-005's closed `grant()` method.
+// ============================================================================
+model SupportSession {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agentAdminId          String    @map("agent_admin_id") @db.Uuid
+  targetUserId              String    @map("target_user_id") @db.Uuid
+  // FR-ADM-006 — required; the DoD's own "cannot be opened without a
+  // justification field populated."
+  justification                 String    @db.Text
+  createdAt                        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  expiresAt                            DateTime  @map("expires_at") @db.Timestamptz(6)
+  // Agent-initiated (§11.7.2 "Active -> Closed: agent ends session").
+  closedAt                                 DateTime? @map("closed_at") @db.Timestamptz(6)
+  // Worker-swept (§11.7.2 "-> Expired: session timeout"), distinct from
+  // closedAt so the audit trail can distinguish "agent ended it" from
+  // "timed out unattended" — §11.2.8's own edge case.
+  expiredAt                                    DateTime? @map("expired_at") @db.Timestamptz(6)
+
+  agentAdmin        Admin     @relation(fields: [agentAdminId], references: [id], onDelete: Restrict)
+  targetUser            User      @relation(fields: [targetUserId], references: [id], onDelete: Restrict)
+  elevationRequests        SupportSessionElevationRequest[]
+
+  @@index([agentAdminId, closedAt, expiredAt])
+  @@index([targetUserId])
+  @@index([expiresAt, closedAt, expiredAt])
+  @@map("support_sessions")
+}
+
+model SupportSessionElevationRequest {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  supportSessionId         String    @map("support_session_id") @db.Uuid
+  createdAt                    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  // Capped at min(disclosed short TTL, the parent session's own expiresAt)
+  // at creation time — an elevated view can never outlive the support
+  // session that authorized it (the same FR-SEC-013 nesting principle
+  // AdminSession.parentSessionId already anticipates for AUTH-002 sessions).
+  expiresAt                        DateTime  @map("expires_at") @db.Timestamptz(6)
+  // NULL = pending. Both set together, atomically, on approval.
+  resolvedAt                           DateTime? @map("resolved_at") @db.Timestamptz(6)
+  // Must be a DIFFERENT super_admin than the session's own agentAdminId —
+  // enforced in the use-case, not the schema.
+  resolvedByAdminId                        String?   @map("resolved_by_admin_id") @db.Uuid
+  // Agent-initiated (§11.7.2 "Elevated -> Active: elevated view closed").
+  closedAt                                     DateTime? @map("closed_at") @db.Timestamptz(6)
+
+  supportSession        SupportSession @relation(fields: [supportSessionId], references: [id], onDelete: Restrict)
+  resolvedByAdmin        Admin?         @relation("SupportSessionElevationApprover", fields: [resolvedByAdminId], references: [id], onDelete: Restrict)
+
+  @@index([supportSessionId, resolvedAt, closedAt])
+  @@map("support_session_elevation_requests")
+}
+
+// ============================================================================
+// §13.19 — Accounts, Transfers & Balance Adjustments
+// ============================================================================
+model Account {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId              String    @map("user_id") @db.Uuid
+  name                  String    @db.Text
+  accountType              String    @map("account_type") @db.Text
+  currency                    String    @db.Char(3)
+  startingBalance                Decimal   @default(0) @map("starting_balance") @db.Decimal(18, 2)
+  isDefault                          Boolean   @default(false) @map("is_default")
+  status                                String    @default("active") @db.Text
+  deletedAt                              DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt                                DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                                  DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  user              User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  currencyRef          Currency  @relation("AccountCurrency", fields: [currency], references: [code], onDelete: Restrict)
+
+  transactionsAttributed  Transaction[] @relation("TransactionAccount")
+  transfersOut               Transaction[] @relation("TransferSource")
+  transfersIn                    Transaction[] @relation("TransferDestination")
+
+  // Real form (partial unique, §13.19.2) lives in the raw-SQL migration:
+  //   UNIQUE (user_id, currency) WHERE is_default = true AND deleted_at IS NULL
+  @@map("accounts")
+}
+
+// ============================================================================
+// §13.20 — Loans & Loan Payments
+// ============================================================================
+model Loan {
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                 String    @map("user_id") @db.Uuid
+  lender                   String    @db.Text
+  principalAmount             Decimal   @map("principal_amount") @db.Decimal(18, 2)
+  outstandingBalance             Decimal   @map("outstanding_balance") @db.Decimal(18, 2)
+  currency                          String    @db.Char(3)
+  interestRate                        Decimal?  @map("interest_rate") @db.Decimal(6, 4)
+  installmentAmount                      Decimal   @map("installment_amount") @db.Decimal(18, 2)
+  installmentFrequency                     String    @map("installment_frequency") @db.Text
+  startDate                                  DateTime  @map("start_date") @db.Date
+  status                                        String    @default("open") @db.Text
+  deletedAt                                      DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt                                        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                                          DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  currencyRef              Currency  @relation("LoanCurrency", fields: [currency], references: [code], onDelete: Restrict)
+  payments                    LoanPayment[]
+
+  @@map("loans")
+}
+
+model LoanPayment {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  loanId               String   @map("loan_id") @db.Uuid
+  amount                 Decimal  @db.Decimal(18, 2)
+  principalPortion          Decimal  @map("principal_portion") @db.Decimal(18, 2)
+  paymentDate                 DateTime @map("payment_date") @db.Date
+  createdAt                     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  loan               Loan     @relation(fields: [loanId], references: [id], onDelete: Restrict)
+
+  @@index([loanId, paymentDate])
+  @@map("loan_payments")
+}
+
+// ============================================================================
+// §13.21 — Savings Goals
+// ============================================================================
+model SavingsGoal {
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                  String    @map("user_id") @db.Uuid
+  name                      String    @db.Text
+  targetAmount                 Decimal   @map("target_amount") @db.Decimal(18, 2)
+  currency                        String    @db.Char(3)
+  targetDate                        DateTime? @map("target_date") @db.Date
+  status                                String    @default("active") @db.Text
+  lastMilestoneFired                      Int?      @map("last_milestone_fired")
+  deletedAt                                  DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt                                    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  currencyRef              Currency  @relation("SavingsGoalCurrency", fields: [currency], references: [code], onDelete: Restrict)
+  contributions              Transaction[]
+
+  @@map("savings_goals")
+}
+
+// ============================================================================
+// §13.22 — Recurring & Scheduled Transactions
+// ============================================================================
+model RecurringTemplate {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                  String   @map("user_id") @db.Uuid
+  templateData               Json     @map("template_data") @db.JsonB
+  cadence                       String   @db.Text
+  nextOccurrenceDate               DateTime @map("next_occurrence_date") @db.Date
+  status                              String   @default("active") @db.Text
+  createdAt                              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([nextOccurrenceDate])
+  @@map("recurring_templates")
+}
+
+model ScheduledTransaction {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                   String    @map("user_id") @db.Uuid
+  transactionData             Json      @map("transaction_data") @db.JsonB
+  scheduledDate                 DateTime  @map("scheduled_date") @db.Date
+  resolvedTransactionId            String?   @map("resolved_transaction_id") @db.Uuid
+  // Paired with resolvedTransactionId — see Transaction.linkedTransactionDate
+  resolvedTransactionDate             DateTime? @map("resolved_transaction_date") @db.Date
+  createdAt                           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user                   User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  resolvedTransaction        Transaction? @relation("ScheduledActivation", fields: [resolvedTransactionId, resolvedTransactionDate], references: [id, transactionDate], onDelete: Restrict)
+
+  @@index([scheduledDate])
+  @@map("scheduled_transactions")
+}
+
+// ============================================================================
+// §13.30 — Event Storage (transactional outbox, ADR-DB-001)
+// ============================================================================
+model DomainEvent {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventType            String    @map("event_type") @db.Text
+  payload                Json      @db.JsonB
+  status                    String    @default("pending") @db.Text
+  dispatchAttempts            Int       @default(0) @map("dispatch_attempts") @db.SmallInt
+  createdAt                      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  dispatchedAt                      DateTime? @map("dispatched_at") @db.Timestamptz(6)
+
+  @@index([status, createdAt])
+  @@map("domain_events")
+}
+
+// ============================================================================
+// §13.37 — Materialized Read Model: user_financial_summary
+// ADR-DB-003 — maintained table, NOT a native MATERIALIZED VIEW (freshness).
+// ============================================================================
+model UserFinancialSummary {
+  userId                    String   @id @map("user_id") @db.Uuid
+  netWorthDefaultCurrency     Decimal  @default(0) @map("net_worth_default_currency") @db.Decimal(18, 2)
+  totalDebtOutstanding           Decimal  @default(0) @map("total_debt_outstanding") @db.Decimal(18, 2)
+  totalLoanOutstanding               Decimal  @default(0) @map("total_loan_outstanding") @db.Decimal(18, 2)
+  lastUpdatedAt                          DateTime @default(now()) @map("last_updated_at") @db.Timestamptz(6)
+
+  user                      User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@map("user_financial_summary")
+}
