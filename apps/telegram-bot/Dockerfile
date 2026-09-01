@@ -13,6 +13,10 @@ WORKDIR /app
 COPY --from=pruner /app/out/json/ .
 RUN pnpm install --frozen-lockfile
 COPY --from=pruner /app/out/full/ .
+# See apps/api/Dockerfile's identical copy for why this is needed:
+# `turbo prune --docker` doesn't include root-level files referenced only
+# via a TypeScript `extends` chain (tsc -b fails with TS5083 otherwise).
+COPY --from=pruner /app/tsconfig.base.json ./tsconfig.base.json
 RUN pnpm --filter @afa/infrastructure run prisma:generate
 RUN pnpm turbo run build --filter=@afa/telegram-bot...
 

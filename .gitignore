@@ -39,3 +39,6 @@ Thumbs.db
 
 # Husky (local override)
 .husky/_/
+
+# Local Claude Code session state
+.claude/
