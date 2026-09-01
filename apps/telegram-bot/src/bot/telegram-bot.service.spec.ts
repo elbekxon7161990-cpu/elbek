@@ -485,16 +485,26 @@ describe('TelegramBotService — update routing (TASK-BOT-001)', () => {
     vi.clearAllMocks();
   });
 
-  it('registers setMyCommands with the full command inventory on module init (FR-BOT-001)', async () => {
+  it('registers setMyCommands with the full command inventory, once unscoped and once per supported language (FR-BOT-001/FR-BOT-009)', async () => {
     const { service } = buildService();
     await service.onModuleInit();
 
-    expect(mockBot.telegram.setMyCommands).toHaveBeenCalledTimes(1);
-    const registered = mockBot.telegram.setMyCommands.mock.calls[0]![0] as { command: string }[];
+    // One unscoped (default/English) call, plus one per DETECTED_LANGUAGES
+    // entry (uz, ru, en) via the language_code scope.
+    expect(mockBot.telegram.setMyCommands).toHaveBeenCalledTimes(4);
+
+    const defaultCall = mockBot.telegram.setMyCommands.mock.calls[0]!;
+    const registered = defaultCall[0] as { command: string }[];
+    expect(defaultCall[1]).toBeUndefined();
     expect(registered.map((c) => c.command)).toContain('start');
     expect(registered.map((c) => c.command)).toContain('cancel');
     expect(registered.map((c) => c.command)).toContain('loans');
     expect(registered).toHaveLength(14);
+
+    const languageCodes = mockBot.telegram.setMyCommands.mock.calls
+      .slice(1)
+      .map((call) => (call[1] as { language_code: string }).language_code);
+    expect(languageCodes.sort()).toEqual(['en', 'ru', 'uz']);
   });
 
   it('launches long-polling when no webhook secret/URL are configured (Chapter 17 §17.2)', async () => {

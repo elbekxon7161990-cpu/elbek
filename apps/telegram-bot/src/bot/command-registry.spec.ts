@@ -1,12 +1,28 @@
+import { DETECTED_LANGUAGES } from '@afa/domain';
 import { describe, expect, it } from 'vitest';
 
-import { COMMAND_DEFINITIONS, IMPLEMENTED_COMMANDS } from './command-registry';
+import { COMMAND_DEFINITIONS, IMPLEMENTED_COMMANDS, localizedCommandList } from './command-registry';
 
 describe('command-registry (TASK-BOT-001)', () => {
-  it('every registered command has a non-empty description', () => {
+  it('every registered command has a non-empty description in every supported language', () => {
     for (const definition of COMMAND_DEFINITIONS) {
       expect(definition.command.length).toBeGreaterThan(0);
-      expect(definition.description.length).toBeGreaterThan(0);
+      for (const language of DETECTED_LANGUAGES) {
+        expect(definition.descriptions[language].length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('localizedCommandList (FR-BOT-009) returns one description per command, in the requested language', () => {
+    for (const language of DETECTED_LANGUAGES) {
+      const list = localizedCommandList(language);
+      expect(list).toHaveLength(COMMAND_DEFINITIONS.length);
+      for (const [i, definition] of COMMAND_DEFINITIONS.entries()) {
+        expect(list[i]).toEqual({
+          command: definition.command,
+          description: definition.descriptions[language],
+        });
+      }
     }
   });
 

@@ -1,3 +1,5 @@
+import type { DetectedLanguage } from '@afa/domain';
+
 /**
  * TASK-BOT-001 (FR-BOT-001, §7.2.4's Command Inventory). Registration
  * (`setMyCommands`) covers all 13 commands so `/`-menu discoverability
@@ -38,31 +40,122 @@
  * describes — a disclosed scope simplification, see TASK-FIN-003's own
  * final report for the reasoning.
  *
- * FR-BOT-009 (per-language localized descriptions) is not implemented here
- * — English-only descriptions, a documented simplification (see this
- * task's final report); the registration mechanism itself is real.
+ * FR-BOT-009 (per-language localized descriptions) — `descriptions` below
+ * carries uz/ru/en text for every command, and `telegram-bot.service.ts`'s
+ * `onModuleInit()` registers one `setMyCommands` call per
+ * `DETECTED_LANGUAGES` entry (via `language_code`) plus one unscoped
+ * default (English), matching this codebase's own `Record<DetectedLanguage,
+ * string>` localization convention (`reply-messages.ts`'s `localize()`).
+ * Telegram scopes this menu by the *Telegram client's own* language
+ * setting, not by any preference stored in our own `users` table — a user
+ * who changes language via `/settings` only changes their chat replies;
+ * the "/" menu still follows their Telegram app's language.
  */
 export interface CommandDefinition {
   command: string;
-  description: string;
+  descriptions: Record<DetectedLanguage, string>;
 }
 
 export const COMMAND_DEFINITIONS: readonly CommandDefinition[] = [
-  { command: 'start', description: 'Onboarding / welcome' },
-  { command: 'help', description: 'List capabilities and example phrasings' },
-  { command: 'report', description: 'Open report menu' },
-  { command: 'dashboard', description: 'Quick-glance financial summary' },
-  { command: 'budget', description: 'Budget management' },
-  { command: 'debts', description: 'Debt overview' },
-  { command: 'loans', description: 'Loan overview, creation, and payments' },
-  { command: 'search', description: 'Search transactions' },
-  { command: 'drafts', description: 'Pending/unfinished entries' },
-  { command: 'export', description: 'Export your data' },
-  { command: 'settings', description: 'Settings menu' },
-  { command: 'undo', description: 'Undo last action' },
-  { command: 'deleteaccount', description: 'Delete your account' },
-  { command: 'cancel', description: 'Cancel any pending action' },
+  {
+    command: 'start',
+    descriptions: { uz: 'Boshlash / xush kelibsiz', ru: 'Начало работы', en: 'Onboarding / welcome' },
+  },
+  {
+    command: 'help',
+    descriptions: {
+      uz: "Imkoniyatlar va namuna so'zlar ro'yxati",
+      ru: 'Список возможностей и примеров фраз',
+      en: 'List capabilities and example phrasings',
+    },
+  },
+  {
+    command: 'report',
+    descriptions: { uz: 'Hisobot menyusini ochish', ru: 'Открыть меню отчётов', en: 'Open report menu' },
+  },
+  {
+    command: 'dashboard',
+    descriptions: {
+      uz: "Tezkor moliyaviy ko'rinish",
+      ru: 'Краткая финансовая сводка',
+      en: 'Quick-glance financial summary',
+    },
+  },
+  {
+    command: 'budget',
+    descriptions: { uz: 'Byudjetni boshqarish', ru: 'Управление бюджетом', en: 'Budget management' },
+  },
+  {
+    command: 'debts',
+    descriptions: { uz: "Qarzlar ro'yxati", ru: 'Обзор долгов', en: 'Debt overview' },
+  },
+  {
+    command: 'loans',
+    descriptions: {
+      uz: "Kreditlar: ko'rish, yaratish, to'lovlar",
+      ru: 'Кредиты: обзор, создание, платежи',
+      en: 'Loan overview, creation, and payments',
+    },
+  },
+  {
+    command: 'search',
+    descriptions: {
+      uz: 'Tranzaksiyalarni qidirish',
+      ru: 'Поиск транзакций',
+      en: 'Search transactions',
+    },
+  },
+  {
+    command: 'drafts',
+    descriptions: {
+      uz: "Kutilayotgan/tugallanmagan yozuvlar",
+      ru: 'Незавершённые записи',
+      en: 'Pending/unfinished entries',
+    },
+  },
+  {
+    command: 'export',
+    descriptions: {
+      uz: "Ma'lumotlaringizni eksport qilish",
+      ru: 'Экспорт ваших данных',
+      en: 'Export your data',
+    },
+  },
+  {
+    command: 'settings',
+    descriptions: { uz: 'Sozlamalar menyusi', ru: 'Меню настроек', en: 'Settings menu' },
+  },
+  {
+    command: 'undo',
+    descriptions: {
+      uz: 'Oxirgi amalni bekor qilish',
+      ru: 'Отменить последнее действие',
+      en: 'Undo last action',
+    },
+  },
+  {
+    command: 'deleteaccount',
+    descriptions: { uz: "Hisobingizni o'chirish", ru: 'Удалить аккаунт', en: 'Delete your account' },
+  },
+  {
+    command: 'cancel',
+    descriptions: {
+      uz: 'Joriy amalni bekor qilish',
+      ru: 'Отменить текущее действие',
+      en: 'Cancel any pending action',
+    },
+  },
 ];
+
+/** Telegraf's `BotCommand` shape (`{ command, description }`) for one language, used by `setMyCommands`. */
+export function localizedCommandList(
+  language: DetectedLanguage,
+): ReadonlyArray<{ command: string; description: string }> {
+  return COMMAND_DEFINITIONS.map((definition) => ({
+    command: definition.command,
+    description: definition.descriptions[language],
+  }));
+}
 
 /** Commands with a real handler in this task; every other registered command replies with `COMMAND_NOT_YET_AVAILABLE_REPLY`. */
 export const IMPLEMENTED_COMMANDS: ReadonlySet<string> = new Set([

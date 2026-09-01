@@ -59,6 +59,7 @@ import {
   compareDecimalAmounts,
   computeMonthlyBoundary,
   convertPercentToDecimalFraction,
+  DETECTED_LANGUAGES,
   generateClarificationFallbackMessage,
   isCustomCategoryWizardStateExpired,
   isLoanWizardStateExpired,
@@ -110,7 +111,7 @@ import {
   buildConfirmationKeyboard,
   buildLoanWizardConfirmationKeyboard,
 } from './confirmation-keyboard';
-import { COMMAND_DEFINITIONS, IMPLEMENTED_COMMANDS } from './command-registry';
+import { IMPLEMENTED_COMMANDS, COMMAND_DEFINITIONS, localizedCommandList } from './command-registry';
 import {
   buildSearchFilterMenuKeyboard,
   buildSearchResultsKeyboard,
@@ -1895,12 +1896,18 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleInit(): Promise<void> {
-    await this.bot.telegram.setMyCommands(
-      COMMAND_DEFINITIONS.map((definition) => ({
-        command: definition.command,
-        description: definition.description,
-      })),
-    );
+    // FR-BOT-009 — one localized command list per supported language (via
+    // Telegram's own `language_code` scope), plus one unscoped default
+    // (English) for any user whose Telegram client language isn't
+    // uz/ru/en. This is Telegram's *client* language, not any preference
+    // stored in our own `users` table — a user's in-app `/settings`
+    // language choice controls their chat replies only, never this menu.
+    await this.bot.telegram.setMyCommands(localizedCommandList('en'));
+    for (const language of DETECTED_LANGUAGES) {
+      await this.bot.telegram.setMyCommands(localizedCommandList(language), {
+        language_code: language,
+      });
+    }
 
     const webhookSecret = this.config.get('TELEGRAM_WEBHOOK_SECRET', { infer: true });
     const webhookUrl = this.config.get('TELEGRAM_WEBHOOK_URL', { infer: true });
