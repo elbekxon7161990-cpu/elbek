@@ -33,7 +33,7 @@ const { mockBot, useHandlers, onHandlers, commandHandlers, catchHandlers } = vi.
       catch: vi.fn((handler: (error: unknown, ctx: unknown) => void) => {
         errorHandlers.push(handler);
       }),
-      launch: vi.fn(),
+      launch: vi.fn().mockResolvedValue(undefined),
       stop: vi.fn(),
       handleUpdate: vi.fn(),
       telegram: {

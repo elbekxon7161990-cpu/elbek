@@ -1903,9 +1903,20 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    // Long-polling — local development only (Chapter 17 §17.2).
-    await this.bot.launch();
-    this.logger.log('Telegram bot launched (long-polling)');
+    // Long-polling — local development only (Chapter 17 §17.2). Telegraf's
+    // `launch()` intentionally never resolves while polling is active: it
+    // awaits `Polling#loop()` (telegraf/lib/core/network/polling.js), whose
+    // `for await` loop only exits once `stop()` calls `abortController.abort()`
+    // — by design, for the life of the process. `await`ing it directly here
+    // would block this method, and therefore NestJS's entire module
+    // bootstrap, forever — confirmed by an actual production boot hang on
+    // the deployment target (process alive, near-zero CPU, no logs, port
+    // never opened). Fire-and-forget with explicit error logging is
+    // Telegraf's own documented pattern for exactly this situation.
+    this.bot.launch().catch((error) => {
+      this.logger.error('Telegram bot long-polling failed', error as Error);
+    });
+    this.logger.log('Telegram bot launching (long-polling)');
   }
 
   onModuleDestroy(): void {
