@@ -1,6 +1,13 @@
 import { Module } from '@nestjs/common';
 import { AppConfigModule, AppLoggerModule } from '@afa/shared';
-import { LlmProviderModule, OcrProviderModule, PrismaModule, QueueModule, RedisModule } from '@afa/infrastructure';
+import {
+  LlmProviderModule,
+  OcrProviderModule,
+  PrismaModule,
+  QueueModule,
+  RedisModule,
+  SttProviderModule,
+} from '@afa/infrastructure';
 
 import { AccountPurgeModule } from './account-deletion/account-purge.module';
 import { BudgetRolloverModule } from './budgets/budget-rollover.module';
@@ -9,7 +16,7 @@ import { DomainEventsModule } from './domain-events/domain-events.module';
 import { FxRateIngestionModule } from './fx-rates/fx-rate-ingestion.module';
 import { OcrModule } from './ocr/ocr.module';
 import { ExtractionModelConfigModule } from './providers/extraction-model-config.module';
-import { SttFallbackModule } from './providers/stt-fallback.module';
+import { SttModule } from './stt/stt.module';
 import { SupportSessionExpiryModule } from './support-sessions/support-session-expiry.module';
 
 /**
@@ -39,17 +46,17 @@ import { SupportSessionExpiryModule } from './support-sessions/support-session-e
  * `ObjectStorageBindingModule`, `@Global()`; the drafts/notification ones
  * are bound below in `OcrModule`'s own import list).
  *
- * `SttModule` (the `@Processor` consuming voice-transcription jobs) remains
- * deliberately unregistered — no real STT provider exists yet (a separate,
- * not-yet-started decision, per this task's own scope). This app still never
- * imports @nestjs/platform-express or telegraf — "the Worker must execute
- * queues only." `SttFallbackModule` is registered anyway, for a narrower
- * reason: `OcrModule` -> `AiExtractionModule` bundles
- * `TranscribeVoiceMessageUseCase` together with `ProcessReceiptImageUseCase`
- * (one shared application module, not split per modality), so `STT_PROVIDER`
- * must resolve for `AiExtractionModule` itself to instantiate, even though
- * nothing in this app ever calls that use-case — see that module's own doc
- * comment.
+ * `SttModule` (the `@Processor` consuming voice-transcription jobs,
+ * `stt-transcription` queue) is now registered — `SttProviderModule` (real
+ * OpenAI Whisper, or an explicit `ALLOW_FAKE_STT_PROVIDER` dev fallback —
+ * never silent) supplies `STT_PROVIDER`, replacing the previous
+ * `SttFallbackModule` placeholder (deleted; per its own doc comment, "must
+ * be REPLACED, never extended, once a real STT adapter exists"). A
+ * deliberately separate vendor/credential (`OPENAI_API_KEY`) from the
+ * Anthropic-backed `LLM_PROVIDER`/`OCR_PROVIDER` above — Claude has no
+ * audio-transcription API. This app still never imports
+ * @nestjs/platform-express or telegraf — "the Worker must execute queues
+ * only."
  */
 @Module({
   imports: [
@@ -67,8 +74,9 @@ import { SupportSessionExpiryModule } from './support-sessions/support-session-e
     LlmProviderModule,
     ExtractionModelConfigModule,
     OcrProviderModule,
-    SttFallbackModule,
+    SttProviderModule,
     OcrModule,
+    SttModule,
   ],
 })
 export class AppModule {}

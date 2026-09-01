@@ -55,6 +55,12 @@ export * from './queue/ocr-extraction.queue.module';
 export * from './providers/anthropic-vision-ocr-provider';
 export * from './providers/ocr-provider.module';
 
+// Real OpenAI Whisper STT provider + composition root — a deliberately
+// separate vendor/credential from the Anthropic-backed LLM/OCR providers
+// above, since Claude has no audio-transcription API.
+export * from './providers/openai-whisper-stt-provider';
+export * from './providers/stt-provider.module';
+
 // TASK-BOT-002 — Dialogue State Machine.
 export * from './conversation/redis-conversation-state.repository';
 export * from './conversation/conversation-state-repository.module';

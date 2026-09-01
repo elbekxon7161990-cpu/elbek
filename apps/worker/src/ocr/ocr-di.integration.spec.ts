@@ -11,11 +11,11 @@ import {
   PrismaModule,
   QueueModule,
   RetryingOcrProvider,
+  SttProviderModule,
 } from '@afa/infrastructure';
 
 import { ObjectStorageBindingModule } from '../account-deletion/object-storage-binding.module';
 import { ExtractionModelConfigModule } from '../providers/extraction-model-config.module';
-import { SttFallbackModule } from '../providers/stt-fallback.module';
 import { OcrExtractionProcessor } from './ocr-extraction.processor';
 import { OcrModule } from './ocr.module';
 
@@ -53,6 +53,9 @@ if (!HAS_REAL_ANTHROPIC_CREDENTIALS) {
   process.env.ALLOW_FAKE_OCR_PROVIDER ??= 'true';
 }
 process.env.ALLOW_FAKE_OBJECT_STORAGE ??= 'true';
+if (!process.env.OPENAI_API_KEY) {
+  process.env.ALLOW_FAKE_STT_PROVIDER ??= 'true';
+}
 
 describe('OcrModule DI / composition-root wiring — real NestJS provider resolution', () => {
   it('resolves OcrExtractionProcessor and ProcessReceiptImageUseCase, with OCR_PROVIDER bound to the real Claude Vision chain when real credentials exist', async () => {
@@ -65,7 +68,7 @@ describe('OcrModule DI / composition-root wiring — real NestJS provider resolu
         LlmProviderModule,
         ExtractionModelConfigModule,
         OcrProviderModule,
-        SttFallbackModule,
+        SttProviderModule,
         OcrModule,
       ],
     }).compile();
