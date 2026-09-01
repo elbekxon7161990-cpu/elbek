@@ -29,6 +29,16 @@ RUN pnpm turbo run build --filter=@afa/api...
 
 FROM node:22-alpine AS runner
 WORKDIR /app
+# Alpine's base image ships no `openssl` binary at all — without it, Prisma
+# Client's runtime platform detection can't determine the actual OpenSSL
+# version present and falls back to assuming OpenSSL 1.1 (the plain
+# "linux-musl" engine target), even though the "linux-musl-openssl-3.0.x"
+# engine (see schema.prisma's binaryTargets) was already generated and
+# present. Confirmed by an actual runtime crash on the deployment target:
+# PrismaClientInitializationError / "Error loading shared library
+# libssl.so.1.1: No such file or directory" — installing openssl here is
+# what lets the correct engine actually get selected at startup.
+RUN apk add --no-cache openssl
 RUN addgroup --system --gid 1001 afa && adduser --system --uid 1001 afa
 COPY --from=installer --chown=afa:afa /app .
 USER afa

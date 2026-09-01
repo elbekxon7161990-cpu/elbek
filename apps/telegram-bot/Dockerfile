@@ -22,6 +22,11 @@ RUN pnpm turbo run build --filter=@afa/telegram-bot...
 
 FROM node:22-alpine AS runner
 WORKDIR /app
+# See apps/api/Dockerfile's identical line for why this is needed: without
+# it, Prisma Client's runtime platform detection can't tell OpenSSL 3.x is
+# present and loads the wrong (OpenSSL-1.1-targeted) engine, crashing at
+# startup.
+RUN apk add --no-cache openssl
 RUN addgroup --system --gid 1001 afa && adduser --system --uid 1001 afa
 COPY --from=installer --chown=afa:afa /app .
 USER afa
