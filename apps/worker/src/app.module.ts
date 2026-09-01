@@ -52,7 +52,7 @@ import { SupportSessionExpiryModule } from './support-sessions/support-session-e
  * never silent) supplies `STT_PROVIDER`, replacing the previous
  * `SttFallbackModule` placeholder (deleted; per its own doc comment, "must
  * be REPLACED, never extended, once a real STT adapter exists"). A
- * deliberately separate vendor/credential (`OPENAI_API_KEY`) from the
+ * deliberately separate vendor/credential (`GEMINI_API_KEY`) from the
  * Anthropic-backed `LLM_PROVIDER`/`OCR_PROVIDER` above — Claude has no
  * audio-transcription API. This app still never imports
  * @nestjs/platform-express or telegraf — "the Worker must execute queues

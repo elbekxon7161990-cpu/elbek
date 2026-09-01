@@ -3,18 +3,17 @@ import { ConfigService } from '@nestjs/config';
 import { STT_PROVIDER } from '@afa/domain';
 import type { SttProvider } from '@afa/domain';
 import type { EnvironmentVariables } from '@afa/shared';
-import OpenAI from 'openai';
 
 import { CircuitBreakerSttProvider } from './circuit-breaker-stt-provider';
 import { FakeSttProvider } from './fake-stt-provider';
-import { OpenAiWhisperSttProvider } from './openai-whisper-stt-provider';
+import { GeminiSttProvider } from './gemini-stt-provider';
 import { RetryingSttProvider } from './retrying-stt-provider';
 
 const logger = new Logger('SttProviderModule');
 
-/** Whisper's own long-running-audio budget; wide margin for a worst-case 3-minute voice note (`DEFAULT_AUDIO_VALIDATION_LIMITS.maxDurationSeconds`). */
-const OPENAI_STT_CLIENT_TIMEOUT_MS = 60_000;
-const DEFAULT_STT_MODEL = 'whisper-1';
+/** Wide margin for a worst-case 3-minute voice note (`DEFAULT_AUDIO_VALIDATION_LIMITS.maxDurationSeconds`). */
+const GEMINI_STT_CLIENT_TIMEOUT_MS = 60_000;
+const DEFAULT_STT_MODEL = 'gemini-2.5-flash';
 
 const NOT_IMPLEMENTED_STT_RESULT = {
   transcript: '',
@@ -30,23 +29,19 @@ const NOT_IMPLEMENTED_STT_RESULT = {
  * convention exactly.
  */
 export function buildSttProvider(config: ConfigService<EnvironmentVariables, true>): SttProvider {
-  const apiKey = config.get('OPENAI_API_KEY', { infer: true });
+  const apiKey = config.get('GEMINI_API_KEY', { infer: true });
 
   if (apiKey) {
-    const model = config.get('OPENAI_STT_MODEL', { infer: true }) ?? DEFAULT_STT_MODEL;
-    // maxRetries: 0 — the SDK's own retry must never run alongside
-    // RetryingSttProvider's, which wraps this adapter below; retrying twice
-    // over would silently multiply both latency and cost per failure.
-    const client = new OpenAI({ apiKey, maxRetries: 0, timeout: OPENAI_STT_CLIENT_TIMEOUT_MS });
-    const openAiWhisper = new OpenAiWhisperSttProvider(client, model, OPENAI_STT_CLIENT_TIMEOUT_MS);
-    const retrying = new RetryingSttProvider(openAiWhisper);
-    return new CircuitBreakerSttProvider(retrying, 'openai-whisper');
+    const model = config.get('GEMINI_STT_MODEL', { infer: true }) ?? DEFAULT_STT_MODEL;
+    const gemini = new GeminiSttProvider(apiKey, model, GEMINI_STT_CLIENT_TIMEOUT_MS);
+    const retrying = new RetryingSttProvider(gemini);
+    return new CircuitBreakerSttProvider(retrying, 'gemini');
   }
 
   const allowFake = config.get('ALLOW_FAKE_STT_PROVIDER', { infer: true });
   if (allowFake) {
     logger.warn(
-      'OPENAI_API_KEY is not set and ALLOW_FAKE_STT_PROVIDER=true — binding a FAKE SttProvider. This must never be true in a production deployment.',
+      'GEMINI_API_KEY is not set and ALLOW_FAKE_STT_PROVIDER=true — binding a FAKE SttProvider. This must never be true in a production deployment.',
     );
     return new FakeSttProvider(NOT_IMPLEMENTED_STT_RESULT);
   }
@@ -55,7 +50,7 @@ export function buildSttProvider(config: ConfigService<EnvironmentVariables, tru
   // (same precedent as buildLlmProvider/buildOcrProvider). A NestJS factory
   // provider that throws fails the whole application's bootstrap.
   throw new Error(
-    'STT_PROVIDER is not configured: OPENAI_API_KEY is missing. Set OPENAI_API_KEY to use the real OpenAI Whisper provider, or explicitly set ALLOW_FAKE_STT_PROVIDER=true for local development only — never in production.',
+    'STT_PROVIDER is not configured: GEMINI_API_KEY is missing. Set GEMINI_API_KEY to use the real Gemini provider, or explicitly set ALLOW_FAKE_STT_PROVIDER=true for local development only — never in production.',
   );
 }
 
@@ -63,9 +58,9 @@ export function buildSttProvider(config: ConfigService<EnvironmentVariables, tru
  * The composition root for `STT_PROVIDER` (TASK-AI-005's port), mirroring
  * `LlmProviderModule`/`OcrProviderModule`'s established
  * real-or-explicit-fake-or-fail-fast pattern exactly. Binds the real
- * `OpenAiWhisperSttProvider` — wrapped in the existing
+ * `GeminiSttProvider` — wrapped in the existing
  * `RetryingSttProvider`/`CircuitBreakerSttProvider` decorators (already
- * built, previously unwired) — when `OPENAI_API_KEY` is configured;
+ * built, previously unwired) — when `GEMINI_API_KEY` is configured;
  * otherwise fails startup unless `ALLOW_FAKE_STT_PROVIDER` explicitly opts
  * into a fake for local development.
  *

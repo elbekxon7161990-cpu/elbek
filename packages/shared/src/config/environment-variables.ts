@@ -144,25 +144,25 @@ export class EnvironmentVariables {
   ALLOW_FAKE_OCR_PROVIDER?: boolean;
 
   /**
-   * The real `OpenAiWhisperSttProvider` adapter's credential — a deliberate
+   * The real `GeminiSttProvider` adapter's credential — a deliberate
    * SEPARATE vendor/credential from `ANTHROPIC_API_KEY`: Anthropic's Claude
-   * models have no audio-transcription API, so Speech-to-Text uses OpenAI's
-   * Whisper endpoint instead, mirroring every other provider category's own
+   * models have no audio-transcription API, so Speech-to-Text uses Google's
+   * Gemini API instead, mirroring every other provider category's own
    * "real-or-explicit-fake-or-fail-fast" composition-root pattern
    * (`LlmProviderModule`/`OcrProviderModule`).
    */
   @IsOptional()
   @IsString()
-  OPENAI_API_KEY?: string;
+  GEMINI_API_KEY?: string;
 
-  /** Falls back to `whisper-1` (the only OpenAI transcription model that supports `response_format: verbose_json`, which this adapter needs for per-segment confidence/detected-language/duration) when unset. */
+  /** Falls back to `gemini-2.5-flash` (native multimodal audio understanding, no separate transcription endpoint needed) when unset. */
   @IsOptional()
   @IsString()
-  OPENAI_STT_MODEL?: string;
+  GEMINI_STT_MODEL?: string;
 
   /**
    * Explicit, dev-only opt-in to bind a fake `SttProvider` when
-   * `OPENAI_API_KEY` is absent — mirrors `ALLOW_FAKE_OCR_PROVIDER`'s
+   * `GEMINI_API_KEY` is absent — mirrors `ALLOW_FAKE_OCR_PROVIDER`'s
    * established convention exactly. Without this flag, `SttProviderModule`
    * fails startup instead of silently running a fake STT provider.
    */

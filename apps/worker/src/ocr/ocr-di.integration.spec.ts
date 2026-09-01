@@ -53,7 +53,7 @@ if (!HAS_REAL_ANTHROPIC_CREDENTIALS) {
   process.env.ALLOW_FAKE_OCR_PROVIDER ??= 'true';
 }
 process.env.ALLOW_FAKE_OBJECT_STORAGE ??= 'true';
-if (!process.env.OPENAI_API_KEY) {
+if (!process.env.GEMINI_API_KEY) {
   process.env.ALLOW_FAKE_STT_PROVIDER ??= 'true';
 }
 

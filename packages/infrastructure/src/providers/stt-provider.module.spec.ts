@@ -4,7 +4,7 @@ import type { EnvironmentVariables } from '@afa/shared';
 
 import { CircuitBreakerSttProvider } from './circuit-breaker-stt-provider';
 import { FakeSttProvider } from './fake-stt-provider';
-import { OpenAiWhisperSttProvider } from './openai-whisper-stt-provider';
+import { GeminiSttProvider } from './gemini-stt-provider';
 import { RetryingSttProvider } from './retrying-stt-provider';
 import { buildSttProvider } from './stt-provider.module';
 
@@ -17,19 +17,19 @@ function makeConfig(
 }
 
 describe('buildSttProvider (SttProviderModule composition)', () => {
-  it('binds the real OpenAI Whisper provider chain (Retrying + CircuitBreaker over OpenAiWhisperSttProvider) when OPENAI_API_KEY is set', () => {
-    const provider = buildSttProvider(makeConfig({ OPENAI_API_KEY: 'sk-test-key' }));
+  it('binds the real Gemini provider chain (Retrying + CircuitBreaker over GeminiSttProvider) when GEMINI_API_KEY is set', () => {
+    const provider = buildSttProvider(makeConfig({ GEMINI_API_KEY: 'test-key' }));
 
     expect(provider).toBeInstanceOf(CircuitBreakerSttProvider);
     const retrying = (provider as unknown as { delegate: unknown }).delegate;
     expect(retrying).toBeInstanceOf(RetryingSttProvider);
-    const openAiWhisper = (retrying as unknown as { delegate: unknown }).delegate;
-    expect(openAiWhisper).toBeInstanceOf(OpenAiWhisperSttProvider);
+    const gemini = (retrying as unknown as { delegate: unknown }).delegate;
+    expect(gemini).toBeInstanceOf(GeminiSttProvider);
   });
 
   it('never binds a FakeSttProvider when a real API key is present, even if ALLOW_FAKE_STT_PROVIDER is also true', () => {
     const provider = buildSttProvider(
-      makeConfig({ OPENAI_API_KEY: 'sk-test-key', ALLOW_FAKE_STT_PROVIDER: true }),
+      makeConfig({ GEMINI_API_KEY: 'test-key', ALLOW_FAKE_STT_PROVIDER: true }),
     );
 
     expect(provider).not.toBeInstanceOf(FakeSttProvider);
@@ -43,12 +43,12 @@ describe('buildSttProvider (SttProviderModule composition)', () => {
   });
 
   it('fails loudly (throws) when the API key is missing and ALLOW_FAKE_STT_PROVIDER is not set — never silently runs a fake in production', () => {
-    expect(() => buildSttProvider(makeConfig({}))).toThrow(/OPENAI_API_KEY/);
+    expect(() => buildSttProvider(makeConfig({}))).toThrow(/GEMINI_API_KEY/);
   });
 
   it('fails loudly when the API key is missing and ALLOW_FAKE_STT_PROVIDER is explicitly false', () => {
     expect(() => buildSttProvider(makeConfig({ ALLOW_FAKE_STT_PROVIDER: false }))).toThrow(
-      /OPENAI_API_KEY/,
+      /GEMINI_API_KEY/,
     );
   });
 
@@ -59,6 +59,6 @@ describe('buildSttProvider (SttProviderModule composition)', () => {
     } catch (error) {
       message = (error as Error).message;
     }
-    expect(message).not.toContain('sk-');
+    expect(message).not.toContain('AIzaSy');
   });
 });
