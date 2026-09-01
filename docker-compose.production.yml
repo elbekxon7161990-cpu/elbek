@@ -45,8 +45,16 @@ services:
           cpus: '0.5'
           memory: 512m
 
+  # `depends_on: redis` only — never `postgres`. This deployment uses
+  # Supabase; docker-compose.yml's own `postgres` service is not part of it.
+  # Confirmed on the real target: a base-level `depends_on: postgres` used
+  # to start that container on every `up -d api/telegram-bot/worker` anyway,
+  # wasting real RAM on a 1GB droplet already under memory pressure.
   api:
     restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
     logging:
       driver: json-file
       options:
@@ -60,6 +68,9 @@ services:
 
   telegram-bot:
     restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
     logging:
       driver: json-file
       options:
@@ -73,6 +84,9 @@ services:
 
   worker:
     restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
     logging:
       driver: json-file
       options:

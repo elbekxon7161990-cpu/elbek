@@ -29,17 +29,23 @@ services:
       timeout: 5s
       retries: 10
 
+  # `depends_on` is deliberately NOT set here — Compose's map-shaped
+  # `depends_on` merges per-key across -f overlays rather than being
+  # replaceable/clearable by one, so any base-level entry would still start
+  # a dependency an overlay never wants (see docker-compose.production.yml's
+  # own comment: this project's production deployment uses Supabase, never
+  # this file's own `postgres` service — a base-level `depends_on: postgres`
+  # was previously starting it anyway on every `up -d api/telegram-bot/worker`,
+  # confirmed wasting real, scarce RAM on a 1GB droplet). Each environment
+  # declares the dependency set it actually wants:
+  # docker-compose.override.yml (local dev, postgres + redis) or
+  # docker-compose.production.yml (production, redis only).
   api:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
     env_file:
       - apps/api/.env
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
 
   telegram-bot:
     build:
@@ -47,11 +53,6 @@ services:
       dockerfile: apps/telegram-bot/Dockerfile
     env_file:
       - apps/telegram-bot/.env
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
 
   worker:
     build:
@@ -59,11 +60,6 @@ services:
       dockerfile: apps/worker/Dockerfile
     env_file:
       - apps/worker/.env
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
 
 volumes:
   afa-postgres-data:
