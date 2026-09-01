@@ -854,7 +854,18 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     });
 
     this.bot.catch((error, ctx) => {
-      this.logger.error(`Unhandled Telegraf error for update ${ctx.updateType}`, error as Error);
+      // `error` is `unknown` (Telegraf's own catch-handler type) — normalize
+      // before logging. Previously passed the raw value as this Logger
+      // call's second argument, which nestjs-pino only serializes when it is
+      // a `string` stack trace; an `Error` instance there was silently
+      // dropped, leaving every real failure logged as a bare, detail-free
+      // "Unhandled Telegraf error" line — confirmed on the deployment target
+      // while diagnosing why the real bot never responded to /start.
+      const normalized = error instanceof Error ? error : new Error(String(error));
+      this.logger.error(
+        `Unhandled Telegraf error for update ${ctx.updateType}: ${normalized.message}`,
+        normalized.stack,
+      );
     });
   }
 
