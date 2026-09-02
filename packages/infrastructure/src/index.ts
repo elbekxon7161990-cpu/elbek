@@ -229,6 +229,10 @@ export * from './repositories/prisma-support-session-elevation.repository';
 export * from './repositories/support-session-elevation-repository.module';
 export * from './queue/support-session-expiry.queue.module';
 
+// Web admin panel (users, dashboard stats).
+export * from './repositories/prisma-admin-dashboard-stats.repository';
+export * from './repositories/admin-dashboard-stats-repository.module';
+
 // TASK-FIN-006 — Custom Categories (Chapter 7 §7.4, Chapter 8 §8.11).
 export * from './conversation/redis-custom-category-wizard-state.repository';
 export * from './conversation/custom-category-wizard-state-repository.module';

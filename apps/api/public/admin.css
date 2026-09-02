@@ -1,0 +1,112 @@
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #f5f6f8;
+  color: #1b1f24;
+}
+.topnav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 24px;
+  background: #fff;
+  border-bottom: 1px solid #e2e5e9;
+}
+.topnav .brand {
+  font-weight: 700;
+  margin-right: 24px;
+}
+.topnav a {
+  color: #444;
+  text-decoration: none;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+}
+.topnav a:hover, .topnav a.active {
+  background: #eef1f5;
+  color: #111;
+}
+.topnav .spacer { flex: 1; }
+.topnav button {
+  background: none;
+  border: none;
+  color: #a33;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 8px 12px;
+}
+main {
+  max-width: 960px;
+  margin: 24px auto;
+  padding: 0 16px;
+}
+.card {
+  background: #fff;
+  border: 1px solid #e2e5e9;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+.stat {
+  background: #fff;
+  border: 1px solid #e2e5e9;
+  border-radius: 8px;
+  padding: 16px;
+  text-align: center;
+}
+.stat .value { font-size: 28px; font-weight: 700; }
+.stat .label { font-size: 13px; color: #666; margin-top: 4px; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+}
+th, td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid #eee;
+  font-size: 14px;
+}
+th { color: #666; font-weight: 600; }
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.badge.active { background: #e3f6e5; color: #1c7c30; }
+.badge.deactivated { background: #fde8e8; color: #a3231e; }
+.badge.pending_deletion { background: #fff3cd; color: #91650b; }
+.badge.deleted { background: #eee; color: #666; }
+button, .btn {
+  cursor: pointer;
+  border: 1px solid #d0d5db;
+  background: #fff;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+}
+button.primary { background: #1a56db; color: #fff; border-color: #1a56db; }
+button.danger { background: #d92d20; color: #fff; border-color: #d92d20; }
+button:hover { opacity: 0.9; }
+.form { max-width: 360px; margin: 80px auto; }
+.form input {
+  width: 100%;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border: 1px solid #d0d5db;
+  border-radius: 6px;
+  font-size: 14px;
+}
+.form label { font-size: 13px; color: #444; display: block; margin-bottom: 4px; }
+.error { color: #d92d20; font-size: 13px; margin-bottom: 12px; min-height: 18px; }
+.pagination { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
+.empty { color: #888; padding: 24px; text-align: center; }

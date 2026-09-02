@@ -288,6 +288,9 @@ export * from './entities/support-session-elevation-request.entity';
 export * from './repositories/support-session-elevation.repository';
 export * from './auth/support-session-constants';
 
+// Web admin panel (users, dashboard stats, support-session list).
+export * from './repositories/admin-dashboard-stats.repository';
+
 // TASK-BOT-SET — /settings (Chapter 7 §7.3/§7.4).
 export * from './users/is-valid-iana-timezone';
 export * from './repositories/user-preference.repository';

@@ -238,6 +238,16 @@ export * from './use-cases/request-support-session-elevation.use-case';
 export * from './use-cases/approve-support-session-elevation.use-case';
 export * from './use-cases/close-support-session-elevation.use-case';
 export * from './use-cases/require-elevated-support-session.use-case';
+export * from './use-cases/list-my-support-sessions.use-case';
 export * from './modules/support-session.module';
 export * from './use-cases/expire-support-sessions.use-case';
 export * from './modules/expire-support-sessions.module';
+
+// Web admin panel (users, dashboard stats).
+export * from './use-cases/list-users.use-case';
+export * from './use-cases/get-user-by-id.use-case';
+export * from './use-cases/block-user.use-case';
+export * from './use-cases/unblock-user.use-case';
+export * from './modules/admin-users.module';
+export * from './use-cases/get-admin-dashboard-stats.use-case';
+export * from './modules/admin-stats.module';

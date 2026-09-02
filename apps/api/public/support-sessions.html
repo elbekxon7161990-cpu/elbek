@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Support Sessions</title>
+  <link rel="stylesheet" href="/admin.css" />
+</head>
+<body>
+  <main>
+    <h2>My Support Sessions</h2>
+    <div id="error" class="error"></div>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>Target user</th>
+            <th>Opened</th>
+            <th>Expires</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div id="empty" class="empty" hidden>No active support sessions.</div>
+    </div>
+  </main>
+
+  <script src="/admin.js"></script>
+  <script src="/support-sessions.js"></script>
+</body>
+</html>

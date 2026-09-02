@@ -14,6 +14,19 @@ export interface NewUserData {
   preferredLanguage?: string;
 }
 
+/** §13.4's `users.status` CHECK constraint values — `User.status` itself stays plain `string` on the entity (see that class's own doc comment); this is only for the admin-panel-facing list/filter/block surface below. */
+export type UserStatus = 'active' | 'deactivated' | 'pending_deletion' | 'deleted';
+
+export interface ListUsersParams {
+  status?: UserStatus;
+  limit: number;
+  offset: number;
+}
+
+export interface CountUsersParams {
+  status?: UserStatus;
+}
+
 /**
  * Port (Chapter 3 §3.3.9 hexagonal boundary) — implemented by
  * packages/infrastructure, consumed by @afa/application use-cases via
@@ -85,4 +98,18 @@ export interface UserRepository {
       timezone: string;
     }>,
   ): Promise<User>;
+  /**
+   * Admin-panel user-management surface — atomic conditional transition,
+   * `'active'` only, same shape as `requestDeletion`/`cancelDeletion` above
+   * (never a read-then-write). Returns `null` when the user was not
+   * `'active'` at the moment of the write; the caller decides how to
+   * respond. The inverse transition reuses `reactivate()` above unchanged —
+   * `'deactivated'` → `'active'` is the same operation regardless of
+   * whether the user reactivated themselves or an admin unblocked them.
+   */
+  block(userId: string): Promise<User | null>;
+  /** Admin-panel user list — paginated, optionally filtered by status, newest first. */
+  listUsers(params: ListUsersParams): Promise<User[]>;
+  /** Total row count for the same filter `listUsers` would apply — for pagination. */
+  countUsers(params: CountUsersParams): Promise<number>;
 }

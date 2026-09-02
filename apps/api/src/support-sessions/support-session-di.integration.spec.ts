@@ -6,6 +6,7 @@ import {
   ApproveSupportSessionElevationUseCase,
   CloseSupportSessionElevationUseCase,
   CloseSupportSessionUseCase,
+  ListMySupportSessionsUseCase,
   OpenSupportSessionUseCase,
   RequestSupportSessionElevationUseCase,
 } from '@afa/application';
@@ -54,6 +55,9 @@ describe('Support Session DI / composition-root wiring — real NestJS provider 
     expect(moduleRef.get(CloseSupportSessionElevationUseCase)).toBeInstanceOf(
       CloseSupportSessionElevationUseCase,
     );
+    expect(moduleRef.get(ListMySupportSessionsUseCase)).toBeInstanceOf(
+      ListMySupportSessionsUseCase,
+    );
 
     const controller = moduleRef.get(SupportSessionController);
     expect(controller).toBeInstanceOf(SupportSessionController);
@@ -62,6 +66,7 @@ describe('Support Session DI / composition-root wiring — real NestJS provider 
     expect((controller as unknown as { requestElevation: unknown }).requestElevation).toBeDefined();
     expect((controller as unknown as { approveElevation: unknown }).approveElevation).toBeDefined();
     expect((controller as unknown as { closeElevation: unknown }).closeElevation).toBeDefined();
+    expect((controller as unknown as { listMySessions: unknown }).listMySessions).toBeDefined();
 
     const sessionGuard = moduleRef.get(SupportSessionGuard);
     expect(sessionGuard).toBeInstanceOf(SupportSessionGuard);

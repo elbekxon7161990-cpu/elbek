@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Admin Login</title>
+  <link rel="stylesheet" href="/admin.css" />
+</head>
+<body>
+  <main class="form">
+    <h2>Admin Login</h2>
+
+    <form id="password-form">
+      <div class="error" id="password-error"></div>
+      <label for="email">Email</label>
+      <input type="email" id="email" required autocomplete="username" />
+      <label for="password">Password</label>
+      <input type="password" id="password" required autocomplete="current-password" />
+      <button type="submit" class="primary">Continue</button>
+    </form>
+
+    <form id="mfa-form" hidden>
+      <div class="error" id="mfa-error"></div>
+      <label for="code">6-digit authenticator code</label>
+      <input type="text" id="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required />
+      <button type="submit" class="primary">Verify</button>
+    </form>
+  </main>
+
+  <script src="/login.js"></script>
+</body>
+</html>

@@ -26,6 +26,16 @@ export interface SupportSessionRepository {
   findActiveById(id: string, now: Date): Promise<SupportSession | null>;
 
   /**
+   * Admin-panel support-session list — every session THIS admin opened that
+   * is still Active (excludes closed/expired/past-expiry, same definition
+   * as `findActiveById`), newest first. Deliberately scoped to one agent,
+   * not every admin's sessions — a support session is already a
+   * per-agent-owned resource (`SupportSessionGuard`'s own cross-identity
+   * isolation check), so the list view mirrors that same boundary.
+   */
+  findActiveByAgentAdminId(agentAdminId: string, now: Date): Promise<SupportSession[]>;
+
+  /**
    * Atomically closes the session (agent-ended) if it is still open.
    * Returns `false` if already closed/expired — never throws for that case.
    */

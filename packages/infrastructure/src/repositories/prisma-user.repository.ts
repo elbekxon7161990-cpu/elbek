@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { NewUserData, UserRepository } from '@afa/domain';
+import type { CountUsersParams, ListUsersParams, NewUserData, UserRepository } from '@afa/domain';
 import { User, accountDeletionCutoff } from '@afa/domain';
 import { Prisma, type User as PrismaUser } from '@prisma/client';
 
@@ -121,5 +121,32 @@ export class PrismaUserRepository implements UserRepository {
       },
     });
     return toDomainUser(row);
+  }
+
+  async block(userId: string): Promise<User | null> {
+    const result = await this.prisma.user.updateMany({
+      where: { id: userId, status: 'active' },
+      data: { status: 'deactivated' },
+    });
+    if (result.count === 0) {
+      return null;
+    }
+    return this.findById(userId);
+  }
+
+  async listUsers(params: ListUsersParams): Promise<User[]> {
+    const rows = await this.prisma.user.findMany({
+      where: params.status !== undefined ? { status: params.status } : undefined,
+      orderBy: { createdAt: 'desc' },
+      take: params.limit,
+      skip: params.offset,
+    });
+    return rows.map(toDomainUser);
+  }
+
+  async countUsers(params: CountUsersParams): Promise<number> {
+    return this.prisma.user.count({
+      where: params.status !== undefined ? { status: params.status } : undefined,
+    });
   }
 }

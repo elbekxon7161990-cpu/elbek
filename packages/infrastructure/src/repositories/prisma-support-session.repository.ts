@@ -76,6 +76,14 @@ export class PrismaSupportSessionRepository implements SupportSessionRepository 
     return row ? toEntity(row) : null;
   }
 
+  async findActiveByAgentAdminId(agentAdminId: string, now: Date): Promise<SupportSession[]> {
+    const rows = await this.prisma.supportSession.findMany({
+      where: { agentAdminId, closedAt: null, expiredAt: null, expiresAt: { gt: now } },
+      orderBy: { createdAt: 'desc' },
+    });
+    return rows.map(toEntity);
+  }
+
   async close(id: string, now: Date): Promise<boolean> {
     const result = await this.prisma.supportSession.updateMany({
       where: { id, closedAt: null, expiredAt: null },

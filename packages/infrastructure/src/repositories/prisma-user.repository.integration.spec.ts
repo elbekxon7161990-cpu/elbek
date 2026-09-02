@@ -152,4 +152,47 @@ describe('PrismaUserRepository (integration)', () => {
       }
     });
   });
+
+  describe('web admin panel — block / listUsers / countUsers', () => {
+    it('block() atomically transitions an active user to deactivated, and returns null on a repeated attempt', async () => {
+      const telegramUserId = TEST_TELEGRAM_USER_ID + 8n;
+      try {
+        const created = await repository.create({ telegramUserId });
+
+        const blocked = await repository.block(created.id);
+        expect(blocked?.status).toBe('deactivated');
+
+        const again = await repository.block(created.id);
+        expect(again).toBeNull();
+      } finally {
+        await prisma.user.deleteMany({ where: { telegramUserId } });
+      }
+    });
+
+    it('listUsers/countUsers filter by status and paginate, real read-after-write', async () => {
+      const activeTelegramId = TEST_TELEGRAM_USER_ID + 9n;
+      const deactivatedTelegramId = TEST_TELEGRAM_USER_ID + 10n;
+      try {
+        const activeUser = await repository.create({ telegramUserId: activeTelegramId });
+        const deactivatedUser = await repository.create({ telegramUserId: deactivatedTelegramId });
+        await repository.block(deactivatedUser.id);
+
+        const deactivatedOnly = await repository.listUsers({
+          status: 'deactivated',
+          limit: 50,
+          offset: 0,
+        });
+        const deactivatedIds = deactivatedOnly.map((u) => u.id);
+        expect(deactivatedIds).toContain(deactivatedUser.id);
+        expect(deactivatedIds).not.toContain(activeUser.id);
+
+        const deactivatedCount = await repository.countUsers({ status: 'deactivated' });
+        expect(deactivatedCount).toBeGreaterThanOrEqual(1);
+      } finally {
+        await prisma.user.deleteMany({
+          where: { telegramUserId: { in: [activeTelegramId, deactivatedTelegramId] } },
+        });
+      }
+    });
+  });
 });

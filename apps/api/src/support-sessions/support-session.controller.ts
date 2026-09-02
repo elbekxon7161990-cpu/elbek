@@ -17,6 +17,7 @@ import {
   ApproveSupportSessionElevationUseCase,
   CloseSupportSessionElevationUseCase,
   CloseSupportSessionUseCase,
+  ListMySupportSessionsUseCase,
   OpenSupportSessionUseCase,
   RequestSupportSessionElevationUseCase,
   SupportSessionElevationInvalidError,
@@ -60,7 +61,33 @@ export class SupportSessionController {
     private readonly approveElevation: ApproveSupportSessionElevationUseCase,
     @Inject(CloseSupportSessionElevationUseCase)
     private readonly closeElevation: CloseSupportSessionElevationUseCase,
+    @Inject(ListMySupportSessionsUseCase)
+    private readonly listMySessions: ListMySupportSessionsUseCase,
   ) {}
+
+  /**
+   * Web admin panel — every session the calling admin currently has open.
+   * Scoped to the caller's own sessions (`request.admin.id`), same
+   * ownership boundary `SupportSessionGuard` already enforces for
+   * single-session operations — see `ListMySupportSessionsUseCase`'s own
+   * doc comment.
+   */
+  @Get()
+  @ApiBearerAuth()
+  @UseGuards(AdminSessionGuard)
+  async listMine(@Req() request: AuthenticatedAdminRequest): Promise<{
+    sessions: { id: string; targetUserId: string; createdAt: Date; expiresAt: Date }[];
+  }> {
+    const sessions = await this.listMySessions.execute(request.admin.id);
+    return {
+      sessions: sessions.map((session) => ({
+        id: session.id,
+        targetUserId: session.targetUserId,
+        createdAt: session.createdAt,
+        expiresAt: session.expiresAt,
+      })),
+    };
+  }
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
