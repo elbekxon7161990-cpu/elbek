@@ -29,6 +29,9 @@ function renderRows(users) {
       <td>${escapeHtml(user.telegramUsername || '—')}</td>
       <td>${escapeHtml(user.displayName || '—')}</td>
       <td><span class="badge ${escapeHtml(user.status)}">${escapeHtml(user.status)}</span></td>
+      <td>${escapeHtml(user.preferredLanguage)}</td>
+      <td>${escapeHtml(user.defaultCurrency)}</td>
+      <td>${escapeHtml(user.timezone)}</td>
       <td>${escapeHtml(created)}</td>
       <td></td>
     `;
