@@ -4,6 +4,7 @@ import type { Job } from 'bullmq';
 import { TranscribeVoiceMessageUseCase } from '@afa/application';
 import type { VoiceTranscriptionJobPayload } from '@afa/domain';
 import { STT_TRANSCRIPTION_QUEUE_NAME } from '@afa/infrastructure';
+import { runWithUserContext } from '@afa/shared';
 
 /**
  * TASK-AI-005 — the thin BullMQ wiring for §6.12.2's "Job dequeued" step.
@@ -26,6 +27,13 @@ import { STT_TRANSCRIPTION_QUEUE_NAME } from '@afa/infrastructure';
  * the Telegram user who sent the voice message legitimately owns
  * `userId`) happens upstream, at enqueue time, in the Bot Application
  * Layer (a different, not-yet-built task).
+ *
+ * Completion round — wraps execution in `runWithUserContext`, the same
+ * single-wrap-point-per-request pattern `OcrExtractionProcessor`'s own
+ * "URGENT follow-up (real-boot fix)" already established: now that
+ * `TranscribeVoiceMessageUseCase` writes a `TransactionDraftRecord`/
+ * `Notification` (both RLS-protected, `RLS_PROTECTED_MODELS`), every real
+ * STT job would fail with `MissingDatabaseUserContextError` without this.
  */
 @Processor(STT_TRANSCRIPTION_QUEUE_NAME)
 @Injectable()
@@ -43,7 +51,9 @@ export class SttTranscriptionProcessor extends WorkerHost {
       );
     }
 
-    const outcome = await this.transcribeVoiceMessage.execute(job.data);
+    const outcome = await runWithUserContext(job.data.userId, () =>
+      this.transcribeVoiceMessage.execute(job.data),
+    );
 
     this.logger.log(`STT job ${job.id} completed with status="${outcome.status}"`);
 

@@ -1,19 +1,32 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { Buffer } from 'node:buffer';
+import { createHash } from 'node:crypto';
 import type {
   AudioValidationFailureReason,
+  DetectedLanguage,
+  DraftRepository,
+  NotificationDeliveryQueue,
+  NotificationRepository,
   ObjectStoragePort,
   SttProvider,
   StructuredTranscriptionResult,
   VoiceTranscriptionJobPayload,
 } from '@afa/domain';
 import {
+  DRAFT_REPOSITORY,
+  NOTIFICATION_DELIVERY_QUEUE,
+  NOTIFICATION_REPOSITORY,
   OBJECT_STORAGE,
   ObjectStorageError,
   STT_PROVIDER,
   SttProviderError,
+  buildOcrDraftReviewKeyboard,
+  computeRequiredFields,
   evaluateAudioValidity,
   normalizeTranscript,
+  renderVoiceDraftReviewMessage,
+  renderVoiceExtractionFailedMessage,
+  renderVoiceNoTransactionDetectedMessage,
   transcriptRequiresConfirmation,
 } from '@afa/domain';
 
@@ -42,11 +55,30 @@ export interface ConfirmationRequiredOutcome {
   transcription: StructuredTranscriptionResult;
 }
 
-/** AC-INP-001 — high confidence, no confirmation prompt, straight into the existing extraction pipeline. */
+/** The audio transcribed fine but no transaction-shaped content was found in it. */
+export interface VoiceNoTransactionDetectedOutcome {
+  status: 'no_transaction_detected';
+}
+
+/**
+ * A draft already exists for this exact `telegramFileId` — a BullMQ
+ * redelivery of the same job (at-least-once delivery) safely no-ops rather
+ * than creating a second draft and sending a second Telegram review card.
+ * Mirrors `ProcessReceiptImageUseCase`'s own `AlreadyProcessedOutcome`
+ * (renamed with a `Voice` prefix here only to avoid the two use cases'
+ * wildcard re-exports from `@afa/application`'s `index.ts` colliding).
+ */
+export interface VoiceAlreadyProcessedOutcome {
+  status: 'already_processed';
+  draftId: string;
+}
+
+/** AC-INP-001 — high confidence, no confirmation prompt, straight into the existing extraction pipeline; a review draft was created and the user notified with a Confirm/Edit/Cancel card. */
 export interface TranscribedOutcome {
   status: 'transcribed';
   transcription: StructuredTranscriptionResult;
   extraction: ExtractionOutcome;
+  draftId: string;
 }
 
 export type TranscribeVoiceMessageOutcome =
@@ -54,7 +86,18 @@ export type TranscribeVoiceMessageOutcome =
   | StorageFailureOutcome
   | SttFailedOutcome
   | ConfirmationRequiredOutcome
+  | VoiceNoTransactionDetectedOutcome
+  | VoiceAlreadyProcessedOutcome
   | TranscribedOutcome;
+
+/** Mirrors `ProcessReceiptImageUseCase`'s own `deterministicDraftId` exactly, salted differently so a voice and a photo message that somehow shared a `telegramFileId` (impossible in practice — Telegram's file ids are already namespaced per message) could never collide. */
+function deterministicDraftId(telegramFileId: string): string {
+  const hex = createHash('sha256')
+    .update(`voice-draft:${telegramFileId}`)
+    .digest('hex')
+    .slice(0, 32);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
 
 /**
  * TASK-AI-005 (Chapter 6 §6.2/§6.12) — the Audio Preprocessor + STT
@@ -84,12 +127,43 @@ export type TranscribeVoiceMessageOutcome =
  * has exhausted its own retry/fallback — this use case does not duplicate
  * that resilience logic, it only converts a final, exhausted failure into
  * the specific outcome FR-STT-007 requires.
+ *
+ * Completion round (mirrors `ProcessReceiptImageUseCase`'s own TASK-AI-006
+ * completion round exactly): a successful, high-confidence transcription
+ * now genuinely produces a `TransactionDraftRecord` (reusing
+ * `DraftRepository` unchanged — the same port/table both the text and OCR
+ * pathways already use) and an async Telegram review notification (reusing
+ * `NotificationRepository`/`NotificationDeliveryQueue` directly, same
+ * immediate-delivery reasoning as the OCR pathway: a user who just spoke a
+ * voice message wants their review card right away, never delayed by
+ * ambient-notification gating). Every non-`transcribed` outcome past the
+ * pre-flight `invalid_audio` check ALSO now sends an honest, plain-text
+ * failure notification (AI-P6, "never silent failure") — before this round,
+ * a failed/low-value STT job produced no user-visible signal at all beyond
+ * the bot's immediate "processing" ack.
+ *
+ * Still never talks to Telegram directly and never writes to Prisma's
+ * `transactions` table itself — draft creation and notification are as far
+ * as this use case's own boundary goes; the actual commit only happens once
+ * the user taps Confirm (`RouteOcrDraftCallbackUseCase`, reused unchanged —
+ * `ocrdraft_<action>:<draftId>` is already source-agnostic, see
+ * `render-voice-draft-review-message.ts`'s own doc comment).
+ *
+ * The `confirmation_required` (low-confidence) path is deliberately left
+ * exactly as before — no draft, no notification here — pending a separate,
+ * not-yet-built text-reply confirmation flow (FR-STT-005's own scope); a
+ * generic honest-failure notification would be actively wrong there since
+ * the transcript is not a failure, just held pending clarification.
  */
 @Injectable()
 export class TranscribeVoiceMessageUseCase {
   constructor(
     @Inject(OBJECT_STORAGE) private readonly objectStorage: ObjectStoragePort,
     @Inject(STT_PROVIDER) private readonly sttProvider: SttProvider,
+    @Inject(DRAFT_REPOSITORY) private readonly draftRepository: DraftRepository,
+    @Inject(NOTIFICATION_REPOSITORY)
+    private readonly notificationRepository: NotificationRepository,
+    @Inject(NOTIFICATION_DELIVERY_QUEUE) private readonly deliveryQueue: NotificationDeliveryQueue,
     private readonly extractTransactionCandidatesUseCase: ExtractTransactionCandidatesUseCase,
   ) {}
 
@@ -103,11 +177,18 @@ export class TranscribeVoiceMessageUseCase {
       return { status: 'invalid_audio', reason: validation.reason };
     }
 
+    const draftId = deterministicDraftId(payload.telegramFileId);
+    const existingDraft = await this.draftRepository.findById(draftId);
+    if (existingDraft !== null) {
+      return { status: 'already_processed', draftId };
+    }
+
     let audio: Buffer;
     try {
       audio = await this.objectStorage.getObject(payload.audioObjectStorageUri);
     } catch (error) {
       if (error instanceof ObjectStorageError) {
+        await this.notifyFailure(payload, renderVoiceExtractionFailedMessage);
         return { status: 'storage_failure', reason: error.message };
       }
       throw error;
@@ -127,6 +208,7 @@ export class TranscribeVoiceMessageUseCase {
       sttDurationSeconds = sttResult.durationSeconds;
     } catch (error) {
       if (error instanceof SttProviderError) {
+        await this.notifyFailure(payload, renderVoiceExtractionFailedMessage);
         return { status: 'stt_failed', reason: error.message };
       }
       throw error;
@@ -134,6 +216,7 @@ export class TranscribeVoiceMessageUseCase {
 
     const normalizedTranscript = normalizeTranscript(rawTranscript);
     if (normalizedTranscript.length === 0) {
+      await this.notifyFailure(payload, renderVoiceExtractionFailedMessage);
       return { status: 'stt_failed', reason: 'Provider returned an empty transcript.' };
     }
 
@@ -163,6 +246,61 @@ export class TranscribeVoiceMessageUseCase {
       inputText: normalizedTranscript,
     });
 
-    return { status: 'transcribed', transcription, extraction };
+    if (extraction.status !== 'valid') {
+      await this.notifyFailure(payload, renderVoiceExtractionFailedMessage);
+      return { status: 'stt_failed', reason: extraction.reason };
+    }
+
+    // Mirrors `ProcessReceiptImageUseCase`'s own single-transaction MVP
+    // scope (FR-OCR-008-style) — a voice message yields at most one
+    // candidate.
+    const candidate = extraction.output.transactions[0];
+    if (candidate === undefined) {
+      await this.notifyFailure(payload, renderVoiceNoTransactionDetectedMessage);
+      return { status: 'no_transaction_detected' };
+    }
+
+    const candidateRecord = candidate as unknown as Record<string, unknown>;
+    const missingFields = computeRequiredFields(candidate).filter(
+      (field) => candidateRecord[field] === null || candidateRecord[field] === undefined,
+    );
+    await this.draftRepository.create({
+      id: draftId,
+      userId: payload.userId,
+      partialData: candidate,
+      missingFields,
+      originalText: normalizedTranscript,
+      sourceType: 'voice',
+    });
+
+    const notification = await this.notificationRepository.create({
+      userId: payload.userId,
+      type: 'VoiceDraftReady',
+      message: renderVoiceDraftReviewMessage(candidate, extraction.output.detectedLanguage),
+      dedupKey: draftId,
+      readyToDeliverAt: new Date(),
+      replyMarkup: buildOcrDraftReviewKeyboard(draftId, extraction.output.detectedLanguage),
+    });
+    await this.deliveryQueue.enqueue(notification.id, payload.userId, new Date());
+
+    return { status: 'transcribed', transcription, extraction, draftId };
+  }
+
+  private async notifyFailure(
+    payload: VoiceTranscriptionJobPayload,
+    renderMessage: (language: DetectedLanguage) => string,
+  ): Promise<void> {
+    // Best-effort, honest failure signal (AI-P6) — a plain-text notification,
+    // no keyboard, no draft. Language defaults to 'en' here: this failure
+    // path has no successful transcription to read a detected language from
+    // (unlike the success path, which uses the real `detectedLanguage`).
+    const notification = await this.notificationRepository.create({
+      userId: payload.userId,
+      type: 'VoiceTranscriptionFailed',
+      message: renderMessage('en'),
+      dedupKey: `voice-failed:${payload.telegramFileId}`,
+      readyToDeliverAt: new Date(),
+    });
+    await this.deliveryQueue.enqueue(notification.id, payload.userId, new Date());
   }
 }

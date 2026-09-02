@@ -182,6 +182,7 @@ export * from './repositories/notification-dedup.repository';
 
 // TASK-AI-006 — Receipt/Screenshot OCR Worker: real provider + draft/review hand-off.
 export * from './notifications/render-ocr-draft-review-message';
+export * from './notifications/render-voice-draft-review-message';
 export * from './repositories/notification-delivery-queue.repository';
 
 // TASK-FIN-003 — Budget System (Chapter 8 §8.4).

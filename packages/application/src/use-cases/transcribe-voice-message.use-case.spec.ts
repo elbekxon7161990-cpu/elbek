@@ -1,14 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Buffer } from 'node:buffer';
 import type {
+  DraftRepository,
   LlmCompletionRequest,
   LlmCompletionResult,
   LlmProvider,
+  NewNotificationData,
+  NewTransactionDraftData,
+  NotificationDeliveryQueue,
+  NotificationRecord,
+  NotificationRepository,
   ObjectStoragePort,
   SttProvider,
   SttProviderError,
   SttTranscriptionRequest,
   SttTranscriptionResult,
+  TransactionDraftRecord,
   VoiceTranscriptionJobPayload,
 } from '@afa/domain';
 import {
@@ -102,6 +109,71 @@ class LocalFakeObjectStorage implements ObjectStoragePort {
   }
 }
 
+/** Local fake, same "no @afa/infrastructure dependency in @afa/application tests" convention as `ProcessReceiptImageUseCase`'s own spec. */
+class LocalFakeDraftRepository implements DraftRepository {
+  readonly drafts = new Map<string, TransactionDraftRecord>();
+  async create(data: NewTransactionDraftData): Promise<TransactionDraftRecord> {
+    const record: TransactionDraftRecord = {
+      ...data,
+      status: 'pending',
+      resolvedTransactionId: null,
+      createdAt: new Date(),
+      lastInteractionAt: new Date(),
+      deletedAt: null,
+    };
+    this.drafts.set(data.id, record);
+    return record;
+  }
+  async findById(id: string): Promise<TransactionDraftRecord | null> {
+    return this.drafts.get(id) ?? null;
+  }
+  async findActiveByUserId(userId: string): Promise<TransactionDraftRecord[]> {
+    return [...this.drafts.values()].filter((d) => d.userId === userId && d.status === 'pending');
+  }
+  async updateStatus(id: string): Promise<TransactionDraftRecord> {
+    const existing = this.drafts.get(id)!;
+    return existing;
+  }
+}
+
+/** Local fake. Records every notification created, so tests can assert on message/keyboard content without a real DB. */
+class LocalFakeNotificationRepository implements NotificationRepository {
+  readonly created: NotificationRecord[] = [];
+  async create(data: NewNotificationData): Promise<NotificationRecord> {
+    const record: NotificationRecord = {
+      id: `notif-${this.created.length + 1}`,
+      userId: data.userId,
+      type: data.type,
+      message: data.message,
+      dedupKey: data.dedupKey,
+      readyToDeliverAt: data.readyToDeliverAt,
+      status: data.status ?? 'queued',
+      suppressedReason: data.suppressedReason ?? null,
+      sentAt: null,
+      createdAt: new Date(),
+      replyMarkup: data.replyMarkup ?? null,
+    };
+    this.created.push(record);
+    return record;
+  }
+  async findById(id: string): Promise<NotificationRecord | null> {
+    return this.created.find((n) => n.id === id) ?? null;
+  }
+  async markSent(): Promise<NotificationRecord | null> {
+    return null;
+  }
+  async markFailed(): Promise<NotificationRecord | null> {
+    return null;
+  }
+}
+
+class LocalFakeNotificationDeliveryQueue implements NotificationDeliveryQueue {
+  readonly enqueued: { notificationId: string; userId: string }[] = [];
+  async enqueue(notificationId: string, userId: string): Promise<void> {
+    this.enqueued.push({ notificationId, userId });
+  }
+}
+
 function sttResult(overrides: Partial<SttTranscriptionResult> = {}): SttTranscriptionResult {
   return {
     transcript: 'spent 45000 on lunch',
@@ -181,7 +253,18 @@ function buildUseCase(
   const validate = new ValidateStructuredAiOutputUseCase(llmProvider);
   const config: ExtractionModelConfig = { model: 'fixture-model' };
   const extract = new ExtractTransactionCandidatesUseCase(validate, config);
-  return { useCase: new TranscribeVoiceMessageUseCase(storage, sttProvider, extract), llmProvider };
+  const draftRepository = new LocalFakeDraftRepository();
+  const notificationRepository = new LocalFakeNotificationRepository();
+  const deliveryQueue = new LocalFakeNotificationDeliveryQueue();
+  const useCase = new TranscribeVoiceMessageUseCase(
+    storage,
+    sttProvider,
+    draftRepository,
+    notificationRepository,
+    deliveryQueue,
+    extract,
+  );
+  return { useCase, llmProvider, draftRepository, notificationRepository, deliveryQueue };
 }
 
 function storageWithAudio(): LocalFakeObjectStorage {
@@ -434,16 +517,24 @@ describe('TranscribeVoiceMessageUseCase', () => {
     }
   });
 
-  it('is idempotent — running the same job payload twice against fresh fakes produces the same outcome shape, and never touches persistence itself', async () => {
-    const first = buildUseCase(new LocalFakeSttProvider(sttResult()), storageWithAudio());
-    const second = buildUseCase(new LocalFakeSttProvider(sttResult()), storageWithAudio());
+  it('is idempotent — a redelivered job for the exact same telegramFileId resolves to the same draft, never a second one', async () => {
+    const { useCase, draftRepository, notificationRepository } = buildUseCase(
+      new LocalFakeSttProvider(sttResult()),
+      storageWithAudio(),
+    );
 
-    const outcomeA = await first.useCase.execute(payload());
-    const outcomeB = await second.useCase.execute(payload());
+    const first = await useCase.execute(payload());
+    const second = await useCase.execute(payload()); // same telegramFileId
 
-    expect(outcomeA.status).toBe(outcomeB.status);
-    // This use case never imports/calls Prisma or any repository — structurally
-    // incapable of creating a duplicate transaction record on a re-run.
+    expect(first.status).toBe('transcribed');
+    expect(second).toEqual({
+      status: 'already_processed',
+      draftId: (first as { draftId: string }).draftId,
+    });
+    expect(draftRepository.drafts.size).toBe(1);
+    // Only the first run's success notification — the redelivered job never
+    // sends a second Telegram message.
+    expect(notificationRepository.created).toHaveLength(1);
   });
 
   it('normalizes the transcript (whitespace) before handing it to the extraction pipeline', async () => {
@@ -475,5 +566,127 @@ describe('TranscribeVoiceMessageUseCase', () => {
     const { useCase } = buildUseCase(stt, storageWithAudio());
 
     await expect(useCase.execute(payload())).rejects.toThrow('unexpected infra fault');
+  });
+
+  describe('completion round — draft creation and review delivery', () => {
+    it('creates a real TransactionDraftRecord for a successfully extracted candidate', async () => {
+      const { useCase, draftRepository } = buildUseCase(
+        new LocalFakeSttProvider(sttResult()),
+        storageWithAudio(),
+      );
+
+      const outcome = await useCase.execute(payload());
+
+      expect(outcome.status).toBe('transcribed');
+      const draftId = (outcome as { draftId: string }).draftId;
+      const draft = await draftRepository.findById(draftId);
+      expect(draft).not.toBeNull();
+      expect(draft!.status).toBe('pending');
+      expect(draft!.sourceType).toBe('voice');
+      expect(draft!.userId).toBe('user-1');
+      expect(draft!.partialData.amount).toBe(45000);
+    });
+
+    it('enqueues a Telegram review notification with a Confirm/Edit/Cancel keyboard referencing the draft id', async () => {
+      const { useCase, notificationRepository, deliveryQueue } = buildUseCase(
+        new LocalFakeSttProvider(sttResult()),
+        storageWithAudio(),
+      );
+
+      const outcome = await useCase.execute(payload());
+      const draftId = (outcome as { draftId: string }).draftId;
+
+      expect(notificationRepository.created).toHaveLength(1);
+      const notification = notificationRepository.created[0]!;
+      expect(notification.type).toBe('VoiceDraftReady');
+      expect(notification.message).toContain('45000');
+      expect(notification.replyMarkup).not.toBeNull();
+      const flatButtons = notification.replyMarkup!.flat();
+      expect(flatButtons.some((b) => b.callback_data === `ocrdraft_confirm:${draftId}`)).toBe(true);
+      expect(flatButtons.some((b) => b.callback_data === `ocrdraft_edit:${draftId}`)).toBe(true);
+      expect(flatButtons.some((b) => b.callback_data === `ocrdraft_cancel:${draftId}`)).toBe(true);
+      expect(deliveryQueue.enqueued).toEqual([
+        { notificationId: notification.id, userId: 'user-1' },
+      ]);
+    });
+
+    it('when the transcript has no transaction-shaped content, sends an honest failure notification and creates no draft', async () => {
+      const stt = new LocalFakeSttProvider(sttResult());
+      const { useCase, draftRepository, notificationRepository } = buildUseCase(
+        stt,
+        storageWithAudio(),
+        llmEnvelope([]), // no transactions extracted
+      );
+
+      const outcome = await useCase.execute(payload());
+
+      expect(outcome).toEqual({ status: 'no_transaction_detected' });
+      expect(draftRepository.drafts.size).toBe(0);
+      expect(notificationRepository.created).toHaveLength(1);
+      expect(notificationRepository.created[0]!.replyMarkup).toBeNull();
+    });
+
+    it('sends an honest failure notification when the STT provider fails entirely', async () => {
+      const stt = new LocalFakeSttProvider(sttResult());
+      stt.enqueue({ error: new SttProviderTimeoutError('fake', 8000) });
+      const { useCase, notificationRepository } = buildUseCase(stt, storageWithAudio());
+
+      const outcome = await useCase.execute(payload());
+
+      expect(outcome.status).toBe('stt_failed');
+      expect(notificationRepository.created).toHaveLength(1);
+      expect(notificationRepository.created[0]!.replyMarkup).toBeNull();
+    });
+
+    it('sends an honest failure notification for a storage failure', async () => {
+      const stt = new LocalFakeSttProvider(sttResult());
+      const { useCase, notificationRepository, deliveryQueue } = buildUseCase(
+        stt,
+        new LocalFakeObjectStorage(), // nothing uploaded
+      );
+
+      const outcome = await useCase.execute(payload());
+
+      expect(outcome.status).toBe('storage_failure');
+      expect(notificationRepository.created).toHaveLength(1);
+      expect(deliveryQueue.enqueued).toHaveLength(1);
+    });
+
+    it('sends no notification for a pre-flight invalid_audio outcome — deliberately not notified to avoid spamming a user for e.g. a corrupted client-side upload', async () => {
+      const { useCase, notificationRepository } = buildUseCase(
+        new LocalFakeSttProvider(sttResult()),
+        storageWithAudio(),
+      );
+
+      await useCase.execute(payload({ sizeBytes: 0 }));
+
+      expect(notificationRepository.created).toHaveLength(0);
+    });
+
+    it('sends no notification for a low-confidence confirmation_required outcome — the transcript is held pending clarification, not a failure', async () => {
+      const stt = new LocalFakeSttProvider(sttResult({ confidence: 0.4 }));
+      const { useCase, notificationRepository, draftRepository } = buildUseCase(
+        stt,
+        storageWithAudio(),
+      );
+
+      const outcome = await useCase.execute(payload());
+
+      expect(outcome.status).toBe('confirmation_required');
+      expect(notificationRepository.created).toHaveLength(0);
+      expect(draftRepository.drafts.size).toBe(0);
+    });
+
+    it('a different telegramFileId always gets its own, independent draft', async () => {
+      const { useCase, draftRepository } = buildUseCase(
+        new LocalFakeSttProvider(sttResult()),
+        storageWithAudio(),
+      );
+
+      await useCase.execute(payload({ telegramFileId: 'file-a' }));
+      await useCase.execute(payload({ telegramFileId: 'file-b' }));
+
+      expect(draftRepository.drafts.size).toBe(2);
+    });
   });
 });

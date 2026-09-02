@@ -69,6 +69,7 @@ describe('SttTranscriptionProcessor', () => {
       status: 'transcribed',
       transcription: { transcript: 'sensitive financial detail' } as never,
       extraction: { status: 'unknown', reason: 'n/a' },
+      draftId: 'draft-1',
     });
     const processor = new SttTranscriptionProcessor(useCase);
 
