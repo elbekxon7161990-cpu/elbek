@@ -1,4 +1,5 @@
-import { ApiError, GoogleGenAI } from '@google/genai';
+import { ApiError, GoogleGenAI, Type } from '@google/genai';
+import type { Schema } from '@google/genai';
 import {
   SttProviderAuthenticationError,
   SttProviderInvalidAudioError,
@@ -15,33 +16,40 @@ import type {
 
 const PROVIDER_NAME = 'gemini';
 
-const STRUCTURED_STT_JSON_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
+/**
+ * Gemini's `responseSchema` follows a restricted, OpenAPI-style Schema
+ * object (`Type` is a single uppercase enum value, nullability is its own
+ * `nullable` flag, no `additionalProperties`) — NOT standard JSON Schema.
+ * Passing a JSON-Schema-shaped object here (e.g. `type: ['string', 'null']`)
+ * fails Gemini's own schema validation on every single request.
+ */
+const STRUCTURED_STT_JSON_SCHEMA: Schema = {
+  type: Type.OBJECT,
   required: ['transcript', 'detectedLanguage', 'confidence', 'durationSeconds'],
   properties: {
     transcript: {
-      type: 'string',
+      type: Type.STRING,
       description:
         'The exact words spoken in the audio, transcribed as literally as possible — never translated or summarized. Empty string if no speech is audible at all.',
     },
     detectedLanguage: {
-      type: ['string', 'null'],
-      enum: ['uz', 'ru', 'en', null],
+      type: Type.STRING,
+      nullable: true,
+      enum: ['uz', 'ru', 'en'],
       description: 'The dominant spoken language, or null if it cannot be determined.',
     },
     confidence: {
-      type: 'number',
+      type: Type.NUMBER,
       description:
         'Your own honest confidence (0.0-1.0) that transcript is an accurate, complete transcription of the audio. Use a LOW value for quiet, muffled, heavily accented, or otherwise hard-to-understand speech — never inflate this to seem helpful.',
     },
     durationSeconds: {
-      type: 'number',
+      type: Type.NUMBER,
       description:
         "Your best estimate of the audio clip's duration in seconds, based on how much speech you heard.",
     },
   },
-} as const;
+};
 
 interface StructuredSttOutput {
   transcript: string;
