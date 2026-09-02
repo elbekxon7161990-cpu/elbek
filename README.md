@@ -54,7 +54,7 @@ docker compose up --build
 docker compose -f docker-compose.yml -f docker-compose.production.yml up -d --build
 ```
 
-`docker-compose.production.yml` (never auto-loaded — must be named explicitly) closes Postgres/Redis to the internet, adds a restart policy/bounded logging/resource limits to every service, and adds a `caddy` service that terminates HTTPS and reverse-proxies to `api`/`telegram-bot` per `deploy/Caddyfile` — neither app container publishes its own host port in this configuration. See `deploy/Caddyfile` for the Telegram webhook route (`bot.example.com` placeholder — replace with your real domain).
+`docker-compose.production.yml` (never auto-loaded — must be named explicitly) closes Postgres/Redis to the internet, adds a restart policy/bounded logging/resource limits to every service, and binds `api`'s port to `127.0.0.1` only (never `0.0.0.0`) — `telegram-bot` publishes no host port at all, since it receives Telegram traffic via long-polling, not a webhook. A reverse proxy terminating HTTPS in front of `api`'s loopback-only port (for the web admin panel) is expected to be provided by the host itself — e.g. a native nginx + Certbot setup — rather than by this compose file, since a deployment host may already have its own web server occupying 80/443 for unrelated sites.
 
 ## Commands
 

@@ -3,8 +3,9 @@ name: afa
 # No host ports are published here on purpose — see docker-compose.override.yml
 # (auto-loaded by plain `docker compose up`, restoring today's exact local-dev
 # behavior) and docker-compose.production.yml (explicit `-f` overlay: closes
-# Postgres/Redis to the internet, fronts api/telegram-bot with Caddy instead
-# of publishing their ports directly). This file is the shared base only.
+# Postgres/Redis to the internet, binds api's port to 127.0.0.1 only for the
+# host's own native nginx reverse proxy — see that file's own comment). This
+# file is the shared base only.
 
 services:
   postgres:

@@ -6,10 +6,17 @@
 #   - restart policy, bounded log growth, and a conservative resource ceiling
 #     per service (deploy.resources.limits — respected by plain `docker
 #     compose up` under Compose V2, no Swarm mode required)
-#   - Caddy, terminating HTTPS on :80/:443 and reverse-proxying to
-#     api/telegram-bot over the internal Compose network — api and
-#     telegram-bot get NO host port here at all; Caddy is the only service
-#     reachable from outside the droplet besides SSH
+#   - `api` binds its host port to 127.0.0.1 only (never 0.0.0.0) — the
+#     actual target deployment host already runs its own native (non-Docker)
+#     nginx + Certbot for an unrelated pre-existing domain and permanently
+#     owns 80/443, so the originally-planned Caddy reverse proxy (see git
+#     history — a `caddy` service used to live in this file) can never bind
+#     those ports on this host and was removed; nginx itself reverse-proxies
+#     the web admin panel to this loopback-only port instead (a separate
+#     nginx site block, outside this repo — see the deployment's own runbook
+#     notes). telegram-bot needs no such binding: it only receives inbound
+#     Telegram traffic via long-polling, not a reverse-proxied webhook, on
+#     this deployment.
 # Postgres/Redis get no host port either — nothing outside this Compose
 # network needs to reach them directly in production (see the deployment
 # audit: closing 5432/6379 to the internet was a HIGH-severity finding).
@@ -55,6 +62,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    ports:
+      - '127.0.0.1:3002:3000'
     logging:
       driver: json-file
       options:
@@ -98,30 +107,3 @@ services:
           cpus: '1.0'
           memory: 512m
 
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    ports:
-      - '80:80'
-      - '443:443'
-    volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
-    depends_on:
-      - api
-      - telegram-bot
-    logging:
-      driver: json-file
-      options:
-        max-size: '10m'
-        max-file: '3'
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 256m
-
-volumes:
-  caddy-data:
-  caddy-config:
