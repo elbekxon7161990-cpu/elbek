@@ -248,6 +248,7 @@ export * from './use-cases/list-users.use-case';
 export * from './use-cases/get-user-by-id.use-case';
 export * from './use-cases/block-user.use-case';
 export * from './use-cases/unblock-user.use-case';
+export * from './use-cases/reset-user-transactions.use-case';
 export * from './modules/admin-users.module';
 export * from './use-cases/get-admin-dashboard-stats.use-case';
 export * from './modules/admin-stats.module';

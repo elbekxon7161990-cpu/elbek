@@ -33,18 +33,31 @@ function renderRows(users) {
       <td></td>
     `;
     const actionCell = tr.lastElementChild;
+
     if (user.status === 'active') {
-      const btn = document.createElement('button');
-      btn.className = 'danger';
-      btn.textContent = 'Block';
-      btn.addEventListener('click', () => blockUser(user.id));
-      actionCell.appendChild(btn);
+      const blockBtn = document.createElement('button');
+      blockBtn.className = 'danger';
+      blockBtn.textContent = 'Block';
+      blockBtn.addEventListener('click', () => blockUser(user.id));
+      actionCell.appendChild(blockBtn);
     } else if (user.status === 'deactivated') {
-      const btn = document.createElement('button');
-      btn.textContent = 'Unblock';
-      btn.addEventListener('click', () => unblockUser(user.id));
-      actionCell.appendChild(btn);
+      const unblockBtn = document.createElement('button');
+      unblockBtn.textContent = 'Unblock';
+      unblockBtn.addEventListener('click', () => unblockUser(user.id));
+      actionCell.appendChild(unblockBtn);
     }
+
+    const editBtn = document.createElement('button');
+    editBtn.textContent = 'Edit';
+    editBtn.addEventListener('click', () => editProfile(user));
+    actionCell.appendChild(editBtn);
+
+    const resetBtn = document.createElement('button');
+    resetBtn.className = 'danger';
+    resetBtn.textContent = 'Reset transactions';
+    resetBtn.addEventListener('click', () => resetTransactions(user.id));
+    actionCell.appendChild(resetBtn);
+
     tbody.appendChild(tr);
   }
 }
@@ -69,6 +82,67 @@ async function blockUser(userId) {
 async function unblockUser(userId) {
   try {
     await apiFetch(`/admin/users/${userId}/unblock`, { method: 'POST' });
+    await load();
+  } catch (error) {
+    document.getElementById('error').textContent = error.message;
+  }
+}
+
+async function editProfile(user) {
+  const language = window.prompt('Preferred language (uz / ru / en):', user.preferredLanguage);
+  if (language === null) {
+    return;
+  }
+  const currency = window.prompt('Default currency (e.g. UZS):', user.defaultCurrency);
+  if (currency === null) {
+    return;
+  }
+  const timezone = window.prompt('Timezone (IANA, e.g. Asia/Tashkent):', user.timezone);
+  if (timezone === null) {
+    return;
+  }
+
+  const body = {};
+  if (language.trim() && language !== user.preferredLanguage) body.language = language.trim();
+  if (currency.trim() && currency !== user.defaultCurrency) body.currency = currency.trim();
+  if (timezone.trim() && timezone !== user.timezone) body.timezone = timezone.trim();
+
+  if (Object.keys(body).length === 0) {
+    return;
+  }
+
+  try {
+    await apiFetch(`/admin/users/${user.id}/profile`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    await load();
+  } catch (error) {
+    document.getElementById('error').textContent = error.message;
+  }
+}
+
+async function resetTransactions(userId) {
+  if (
+    !window.confirm(
+      'This permanently deletes ALL of this user\'s transactions, including ones linked to savings goals (which will leave those goals\' progress stale). Continue?',
+    )
+  ) {
+    return;
+  }
+  const justification = window.prompt('Justification for resetting this user\'s transactions (required):');
+  if (!justification) {
+    return;
+  }
+  try {
+    const result = await apiFetch(`/admin/users/${userId}/reset-transactions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ justification }),
+    });
+    document.getElementById('error').textContent = '';
+    window.alert(`Deleted ${result.deletedCount} transaction(s).`);
     await load();
   } catch (error) {
     document.getElementById('error').textContent = error.message;

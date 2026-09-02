@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   ConflictException,
   Controller,
@@ -8,6 +9,7 @@ import {
   Inject,
   NotFoundException,
   Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -18,14 +20,19 @@ import {
   BlockUserUseCase,
   GetUserByIdUseCase,
   ListUsersUseCase,
+  ResetUserTransactionsUseCase,
   UnblockUserUseCase,
+  UpdateUserProfileUseCase,
 } from '@afa/application';
+import type { UpdateUserProfileField } from '@afa/application';
 
 import { AdminSessionGuard } from '../admin-auth/admin-session.guard';
 import type { AuthenticatedAdminRequest } from '../admin-auth/admin-session.guard';
 import { RequireAdminOrSuperAdminGuard } from '../rbac/require-admin-or-super-admin.guard';
 import { BlockUserDto } from './dto/block-user.dto';
 import { ListUsersQueryDto } from './dto/list-users-query.dto';
+import { ResetUserTransactionsDto } from './dto/reset-user-transactions.dto';
+import { UpdateUserProfileDto } from './dto/update-user-profile.dto';
 
 export interface UserSummaryDto {
   id: string;
@@ -33,6 +40,9 @@ export interface UserSummaryDto {
   displayName: string | null;
   status: string;
   createdAt: Date;
+  preferredLanguage: string;
+  defaultCurrency: string;
+  timezone: string;
 }
 
 /**
@@ -49,6 +59,9 @@ export class AdminUsersController {
     @Inject(GetUserByIdUseCase) private readonly getUserById: GetUserByIdUseCase,
     @Inject(BlockUserUseCase) private readonly blockUser: BlockUserUseCase,
     @Inject(UnblockUserUseCase) private readonly unblockUser: UnblockUserUseCase,
+    @Inject(ResetUserTransactionsUseCase)
+    private readonly resetUserTransactions: ResetUserTransactionsUseCase,
+    @Inject(UpdateUserProfileUseCase) private readonly updateUserProfile: UpdateUserProfileUseCase,
   ) {}
 
   @Get()
@@ -113,6 +126,68 @@ export class AdminUsersController {
       );
     }
   }
+
+  /**
+   * Bulk-deletes (soft) every one of this user's transactions — see
+   * `ResetUserTransactionsUseCase`'s own doc comment for the deliberate,
+   * confirmed-with-the-product-owner consequence of also force-deleting
+   * goal-linked transfers (stale `SavingsGoal.currentAmount`, no
+   * reconciliation mechanism exists yet).
+   */
+  @Post(':id/reset-transactions')
+  @ApiBearerAuth()
+  @UseGuards(AdminSessionGuard, RequireAdminOrSuperAdminGuard)
+  async resetTransactions(
+    @Param('id') id: string,
+    @Body() dto: ResetUserTransactionsDto,
+    @Req() request: AuthenticatedAdminRequest,
+  ): Promise<{ deletedCount: number }> {
+    return this.resetUserTransactions.execute(id, dto.justification, request.admin.id);
+  }
+
+  /**
+   * Calls `UpdateUserProfileUseCase` once per field actually present in the
+   * body — that use case is the real validation authority for each field's
+   * value (see its own doc comment); a single invalid field throws before
+   * any of the request's other fields are applied, so a partially-invalid
+   * request never applies a partial update.
+   */
+  @Patch(':id/profile')
+  @ApiBearerAuth()
+  @UseGuards(AdminSessionGuard, RequireAdminOrSuperAdminGuard)
+  async updateProfile(
+    @Param('id') id: string,
+    @Body() dto: UpdateUserProfileDto,
+  ): Promise<UserSummaryDto> {
+    const edits: [UpdateUserProfileField, string][] = [];
+    if (dto.language !== undefined) {
+      edits.push(['language', dto.language]);
+    }
+    if (dto.currency !== undefined) {
+      edits.push(['currency', dto.currency]);
+    }
+    if (dto.timezone !== undefined) {
+      edits.push(['timezone', dto.timezone]);
+    }
+
+    let latest: UserSummaryDto | null = null;
+    for (const [field, value] of edits) {
+      const outcome = await this.updateUserProfile.execute(id, field, value);
+      if (outcome.kind === 'invalid_value') {
+        throw new BadRequestException(`Invalid value for "${field}".`);
+      }
+      latest = toUserSummaryDto(outcome.user);
+    }
+
+    if (latest) {
+      return latest;
+    }
+    const user = await this.getUserById.execute(id);
+    if (!user) {
+      throw new NotFoundException('User not found.');
+    }
+    return toUserSummaryDto(user);
+  }
 }
 
 function toUserSummaryDto(user: {
@@ -121,6 +196,9 @@ function toUserSummaryDto(user: {
   displayName: string | null;
   status: string;
   createdAt: Date;
+  preferredLanguage: string;
+  defaultCurrency: string;
+  timezone: string;
 }): UserSummaryDto {
   return {
     id: user.id,
@@ -128,5 +206,8 @@ function toUserSummaryDto(user: {
     displayName: user.displayName,
     status: user.status,
     createdAt: user.createdAt,
+    preferredLanguage: user.preferredLanguage,
+    defaultCurrency: user.defaultCurrency,
+    timezone: user.timezone,
   };
 }

@@ -6,6 +6,9 @@ import {
   AdminRepositoryModule,
   AdminSessionRepositoryModule,
   AuditLogRepositoryModule,
+  CurrencyRepositoryModule,
+  TransactionAuditLogRepositoryModule,
+  TransactionRepositoryModule,
   UserRepositoryModule,
 } from '@afa/infrastructure';
 
@@ -18,12 +21,18 @@ import { AdminUsersController } from './admin-users.controller';
  * `SupportSessionHttpModule`. Re-provides `AdminSessionGuard` here
  * (importing the SAME class, never a duplicate implementation) for the
  * identical reason every sibling http module already documents.
+ * `TransactionRepositoryModule`/`TransactionAuditLogRepositoryModule` are
+ * needed by `ResetUserTransactionsUseCase`; `CurrencyRepositoryModule` by
+ * `UpdateUserProfileUseCase`'s currency validation.
  */
 @Module({
   imports: [
     AdminUsersModule,
     UserRepositoryModule,
     AuditLogRepositoryModule,
+    TransactionRepositoryModule,
+    TransactionAuditLogRepositoryModule,
+    CurrencyRepositoryModule,
     AdminAuthModule,
     AdminRepositoryModule,
     AdminSessionRepositoryModule,

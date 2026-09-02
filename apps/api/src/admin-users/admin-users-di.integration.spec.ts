@@ -6,12 +6,17 @@ import {
   BlockUserUseCase,
   GetUserByIdUseCase,
   ListUsersUseCase,
+  ResetUserTransactionsUseCase,
   UnblockUserUseCase,
+  UpdateUserProfileUseCase,
 } from '@afa/application';
 import {
   ADMIN_REPOSITORY,
   ADMIN_SESSION_REPOSITORY,
   AUDIT_LOG_REPOSITORY,
+  CURRENCY_REPOSITORY,
+  TRANSACTION_AUDIT_LOG_REPOSITORY,
+  TRANSACTION_REPOSITORY,
   USER_REPOSITORY,
 } from '@afa/domain';
 
@@ -40,6 +45,10 @@ describe('Admin Users DI / composition-root wiring — real NestJS provider reso
     expect(moduleRef.get(GetUserByIdUseCase)).toBeInstanceOf(GetUserByIdUseCase);
     expect(moduleRef.get(BlockUserUseCase)).toBeInstanceOf(BlockUserUseCase);
     expect(moduleRef.get(UnblockUserUseCase)).toBeInstanceOf(UnblockUserUseCase);
+    expect(moduleRef.get(ResetUserTransactionsUseCase)).toBeInstanceOf(
+      ResetUserTransactionsUseCase,
+    );
+    expect(moduleRef.get(UpdateUserProfileUseCase)).toBeInstanceOf(UpdateUserProfileUseCase);
 
     const controller = moduleRef.get(AdminUsersController);
     expect(controller).toBeInstanceOf(AdminUsersController);
@@ -47,6 +56,12 @@ describe('Admin Users DI / composition-root wiring — real NestJS provider reso
     expect((controller as unknown as { getUserById: unknown }).getUserById).toBeDefined();
     expect((controller as unknown as { blockUser: unknown }).blockUser).toBeDefined();
     expect((controller as unknown as { unblockUser: unknown }).unblockUser).toBeDefined();
+    expect(
+      (controller as unknown as { resetUserTransactions: unknown }).resetUserTransactions,
+    ).toBeDefined();
+    expect(
+      (controller as unknown as { updateUserProfile: unknown }).updateUserProfile,
+    ).toBeDefined();
 
     expect(moduleRef.get(AdminSessionGuard)).toBeInstanceOf(AdminSessionGuard);
     expect(moduleRef.get(RequireAdminOrSuperAdminGuard)).toBeInstanceOf(
@@ -55,6 +70,9 @@ describe('Admin Users DI / composition-root wiring — real NestJS provider reso
 
     expect(moduleRef.get(USER_REPOSITORY)).toBeDefined();
     expect(moduleRef.get(AUDIT_LOG_REPOSITORY)).toBeDefined();
+    expect(moduleRef.get(TRANSACTION_REPOSITORY)).toBeDefined();
+    expect(moduleRef.get(TRANSACTION_AUDIT_LOG_REPOSITORY)).toBeDefined();
+    expect(moduleRef.get(CURRENCY_REPOSITORY)).toBeDefined();
     expect(moduleRef.get(ADMIN_REPOSITORY)).toBeDefined();
     expect(moduleRef.get(ADMIN_SESSION_REPOSITORY)).toBeDefined();
 
